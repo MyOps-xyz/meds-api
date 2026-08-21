@@ -1,8 +1,15 @@
-# Binaires compilés
+# Binaires compilés.
+#
+# Les motifs sont ancrés à la racine par un « / » initial. Sans lui, git
+# applique le motif à tout composant de chemin : « meds-api » excluait aussi
+# le répertoire cmd/meds-api/, et les deux paquets `main` du projet ont ainsi
+# manqué au dépôt sans que rien ne le signale — `go test ./...` ne se plaint
+# pas d'un paquet absent. Voir le garde-fou « compilation des commandes »
+# dans .github/workflows/ci.yml.
 /bin/
 /dist/
-meds-api
-bdpm-sync
+/meds-api
+/bdpm-sync
 
 # Artefacts de test et de couverture
 *.test
