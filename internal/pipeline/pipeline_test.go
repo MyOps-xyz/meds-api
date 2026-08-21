@@ -482,6 +482,21 @@ func TestPipeline_TriggerRefuseSiEnCours(t *testing.T) {
 	if _, err := p.Trigger(); err != nil {
 		t.Fatal(err)
 	}
+	// La synchronisation déclenchée s'exécute en arrière-plan et continue
+	// d'écrire dans le DataDir après le retour du test. Sans cette attente,
+	// le t.TempDir() est supprimé pendant l'écriture et le nettoyage échoue
+	// par intermittence sur « directory not empty ». Enregistré après
+	// testPipeline, donc exécuté AVANT la suppression du répertoire (les
+	// nettoyages se déroulent en ordre inverse d'enregistrement).
+	t.Cleanup(func() {
+		for i := 0; i < 500 && p.Running(); i++ {
+			time.Sleep(10 * time.Millisecond)
+		}
+		if p.Running() {
+			t.Error("la synchronisation déclenchée ne s'est pas terminée en 5 s")
+		}
+	})
+
 	// Le second appel doit être refusé tant que le premier tourne. La
 	// synchronisation dure quelques millisecondes : on tente jusqu'à
 	// observer soit le refus, soit la fin.
