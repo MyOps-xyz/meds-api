@@ -18,6 +18,15 @@ http:
         contentSecurityPolicy: "default-src 'none'; frame-ancestors 'none'"
         customResponseHeaders:
           Server: ""
+          # Refus d'indexation et de réutilisation (ADR 0008). Même valeur que
+          # dans les deux profils Caddy — la parité des en-têtes est le contrat.
+          #
+          # Ce que ce profil n'a PAS, en revanche : /robots.txt, /llms.txt et
+          # /ai.txt. Traefik ne sert pas de fichier statique sans un service
+          # dédié en plus, et en ajouter un pour trois fichiers texte coûterait
+          # plus que le gain. Limite assumée : ne pas exposer meds-api derrière
+          # Traefik si le refus déclaratif par fichiers est requis.
+          X-Robots-Tag: "noindex, nofollow, noarchive, nosnippet, noimageindex, notranslate, noai, noimageai"
 
     # Refus inconditionnel : aucune adresse ne correspond à cette plage.
     #

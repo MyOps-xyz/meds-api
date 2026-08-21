@@ -32,6 +32,10 @@ services:
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - ./conf.d:/etc/caddy/conf.d:ro
+      # robots.txt, llms.txt, ai.txt — servis par le fragment (indexation-refusee).
+      # Hors de deploy/edge/ à dessein : le profil `caddy` dédié monte le même
+      # dossier, une seule source pour les deux frontaux.
+      - ../static:/srv/indexation:ro
       # Certificats et clés de compte ACME. À PERSISTER : sans ce volume, chaque
       # redémarrage redemande tous les certificats et consomme le quota Let's Encrypt.
       - caddy-data:/data

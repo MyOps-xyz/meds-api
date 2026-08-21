@@ -211,9 +211,42 @@ d'injection classiques (SQL, template, commande) sont **structurellement absente
 | `X-Frame-Options` | `DENY` | Anti-clickjacking sur `/docs` |
 | `Referrer-Policy` | `strict-origin-when-cross-origin` | Limite la fuite d'URL |
 | `Content-Security-Policy` | `default-src 'none'; …` sur `/docs` | Confine la documentation |
+| `X-Robots-Tag` | `noindex, nofollow, …, noai` | Refus d'indexation et d'entraînement |
 | `X-Request-Id` | ULID | Corrélation client ↔ serveur |
 
-`Server` est retiré : il n'apporte rien au client et renseigne un attaquant.
+`Server` est retiré : il n'apporte rien au client et renseigne un attaquant. Y compris sur la
+redirection `80→443`, qui vit hors de tout bloc de site et échappait donc au `-Server` des profils
+Caddy — corrigé par un bloc `http://` explicite
+([ADR 0008](adr/0008-refus-indexation-et-entrainement-ia.md)).
+
+### Refus d'indexation et d'entraînement IA
+
+`X-Robots-Tag` est posé aux **cinq** endroits qui portent des en-têtes de sécurité — les deux
+Caddyfile de `deploy/edge/`, `deploy/caddy/Caddyfile`, le middleware Traefik et `SecurityHeaders`.
+Redondance délibérée : l'application est aussi jointe directement sur le réseau `internal`, où
+aucun frontal n'intervient.
+
+Sur le frontal mutualisé, l'en-tête vit dans le fragment `indexation-refusee` et non dans
+`hardened`, pour qu'un service à référencer puisse simplement ne pas l'importer — un `header`
+contenant `-Server` est `deferred` et ne peut plus être neutralisé
+([08 §6.3](08-deploiement-docker.md)).
+
+Trois fichiers le disent en clair, servis par les profils Caddy depuis `deploy/static/` :
+
+| Fichier | Format | Contenu |
+|---|---|---|
+| `/robots.txt` | RFC 9309 | `Disallow: /` général, `Content-Signal`, sections par robot IA |
+| `/ai.txt` | Spawning | Opt-out de la collecte pour l'entraînement |
+| `/llms.txt` | Markdown | Politique lisible, et pointeur vers la source ANSM |
+
+S'y ajoute un `403` au frontal sur une liste de robots d'entraînement notoires, fondé sur le
+`User-Agent`. **Ce filtrage ne s'applique jamais aux trois fichiers ci-dessus** : la RFC 9309
+§2.3.1.4 lit un `robots.txt` en `4xx` comme « aucune restriction », et un `403` y produirait
+l'effet inverse de celui recherché. Portée, limites et coût de maintenance de la liste :
+[ADR 0008](adr/0008-refus-indexation-et-entrainement-ia.md).
+
+Le profil `traefik` porte l'en-tête mais **pas** les trois fichiers — Traefik ne sert pas de
+statique sans un service supplémentaire.
 
 ### CORS
 

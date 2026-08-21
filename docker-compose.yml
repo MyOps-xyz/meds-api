@@ -101,6 +101,9 @@ services:
       ACME_EMAIL: ${ACME_EMAIL:-}
     volumes:
       - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # robots.txt, llms.txt, ai.txt — même dossier que le frontal mutualisé
+      # de deploy/edge/, pour que les deux profils Caddy servent le même refus.
+      - ./deploy/static:/srv/indexation:ro
       - caddy-data:/data # certificats — DOIT être persisté
       - caddy-config:/config
     depends_on:

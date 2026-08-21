@@ -12,6 +12,29 @@
 	servers {
 		protocols h1 h2 h3
 	}
+
+	# La redirection HTTP→HTTPS est reprise à la main juste en dessous. Motif :
+	# celle que Caddy génère seul vit HORS de tout bloc de site, n'exécute donc
+	# aucune directive `header`, et émet `Server: Caddy` — la seule réponse du
+	# frontal à le faire. Mesuré le 21/08/2026 : `curl -I http://…/` renvoyait
+	# `308` avec `Server: Caddy`.
+	#
+	# Ce réglage ne touche PAS le challenge ACME HTTP-01 : sa route est
+	# installée avant les blocs de site et reste prioritaire sur le bloc
+	# `http://` ci-dessous. Vérifié le 21/08/2026 (voir 08 §6.5).
+	auto_https disable_redirects
+}
+
+# Redirection HTTP→HTTPS, explicite et sans signature de serveur.
+#
+# Bloc attrape-tout : il vaut pour TOUS les domaines de conf.d/, présents et à
+# venir. Ne pas le dupliquer par service.
+#
+# `header` sans matcher plutôt que via (hardened) : les autres en-têtes de
+# durcissement n'ont aucun sens sur un 308 qui ne porte pas de contenu.
+http:// {
+	header -Server
+	redir https://{host}{uri} permanent
 }
 
 # ─── Fragments réutilisables ──────────────────────────────────────────────
@@ -35,6 +58,73 @@
 		Referrer-Policy "strict-origin-when-cross-origin"
 		-Server
 	}
+}
+
+# Fichiers de refus d'indexation et d'entraînement : /robots.txt, /llms.txt, /ai.txt.
+#
+# Servis par le frontal et non par l'application : ils décrivent le DOMAINE, pas
+# l'API. Le contenu vit dans deploy/static/, monté en lecture seule sur
+# /srv/indexation et partagé avec le profil `caddy` dédié.
+#
+# Deux subtilités d'ordonnancement, toutes deux nécessaires :
+#
+#  1. `file_server` est ordonné APRÈS `reverse_proxy`. Écrire `root @m …` puis
+#     `file_server @m` dans le style du `respond @ops 403` ci-dessous ne
+#     marcherait pas : le `reverse_proxy` nu des blocs de conf.d/ capterait
+#     /robots.txt en premier et l'API répondrait 404. D'où le `handle`, qui est
+#     ordonné avant `reverse_proxy`.
+#
+#  2. `handle` est ordonné avant `respond`, donc ce fragment passe AVANT le 403
+#     de (anti-ia) : un robot par ailleurs refusé lit quand même robots.txt.
+#     C'est indispensable — la RFC 9309 §2.3.1.4 interprète un robots.txt en 4xx
+#     comme « aucune restriction », et un 403 ici produirait l'effet inverse de
+#     celui recherché.
+#
+# Ne jamais introduire un `handle` SANS matcher dans un bloc de site : il
+# capterait tout avant le `respond @ops 403` de (ops-privees) et ferait fuiter
+# /metrics vers Internet.
+(indexation-refusee) {
+	# L'en-tête vit ICI et non dans (hardened) : un `header` contenant `-Server`
+	# est marqué `deferred` par Caddy, donc appliqué à l'écriture de la réponse,
+	# APRÈS tout `header` posé plus loin dans le bloc de site. Un service à
+	# indexer ne pourrait alors plus le neutraliser — ni par `-X-Robots-Tag`, ni
+	# par écrasement, ni avec `defer`. Vérifié le 21/08/2026 : les trois échouent.
+	#
+	# En le plaçant dans ce fragment, la composition redevient explicite :
+	# un service à référencer n'importe simplement pas `indexation-refusee`.
+	#
+	# `noai` et `noimageai` ne sont pas normalisés (convention Spawning) :
+	# inoffensifs pour les autres robots, lus par ceux qui les comprennent.
+	header X-Robots-Tag "noindex, nofollow, noarchive, nosnippet, noimageindex, notranslate, noai, noimageai"
+
+	@fichiers-indexation path /robots.txt /llms.txt /ai.txt
+	handle @fichiers-indexation {
+		root * /srv/indexation
+		# Explicite plutôt que déduit de l'extension : avec `nosniff`, un
+		# Content-Type erroné rendrait le fichier illisible sans recours.
+		header Content-Type "text/plain; charset=utf-8"
+		file_server
+	}
+}
+
+# Robots d'entraînement notoires : refus EFFECTIF, pas seulement déclaratif.
+#
+# Complète (indexation-refusee) et X-Robots-Tag, ne les remplace pas : ceux-ci
+# s'adressent aux robots qui coopèrent, celui-ci à ceux qui les ignorent.
+#
+# Limites assumées (ADR 0008) : la liste vieillit, et un agent qui falsifie son
+# User-Agent passe au travers. C'est une gêne, pas une barrière.
+#
+# `Google-Extended` et `Applebot-Extended` sont volontairement ABSENTS : ce sont
+# des jetons robots.txt, pas des User-Agent — ils ne matcheraient jamais ici, et
+# filtrer `Applebot` bloquerait Siri et Spotlight, ce qui est une autre décision.
+#
+# `ChatGPT-User`, `Claude-User` et `Perplexity-User` désignent des récupérations
+# demandées par un humain, pas du moissonnage. Les refuser est un choix délibéré :
+# les retirer du motif si l'on veut laisser passer la consultation à la demande.
+(anti-ia) {
+	@robots-ia header_regexp User-Agent "(?i)(GPTBot|ChatGPT-User|OAI-SearchBot|ClaudeBot|Claude-User|Claude-SearchBot|anthropic-ai|PerplexityBot|Perplexity-User|CCBot|Bytespider|Amazonbot|Meta-External|FacebookBot|Diffbot|cohere-ai|cohere-training-data-crawler|MistralAI-User|AI2Bot|Ai2Bot-Dolma|YouBot|DuckAssistBot|ImagesiftBot|Timpibot|PanguBot|Webzio-Extended|SemrushBot-OCOB|FirecrawlAgent|img2dataset|Omgilibot)"
+	respond @robots-ia 403
 }
 
 # Endpoints d'exploitation : JAMAIS servis par le frontal public.

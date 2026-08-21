@@ -1,0 +1,15 @@
+# ai.txt — opt-out de la collecte pour l'entraînement de modèles.
+#
+# Format Spawning (site.spawning.ai). Il double /robots.txt et /llms.txt :
+# les trois disent la même chose, chacun dans le format qu'un collecteur
+# donné est susceptible de lire.
+#
+# Aucun contenu de ce domaine ne peut être collecté, agrégé ou intégré à un
+# jeu de données d'entraînement, quel que soit le type de média.
+#
+# Les données sous-jacentes proviennent de la BDPM, publiée en open data par
+# l'ANSM. Les récupérer à la source, pas ici :
+#   https://base-donnees-publique.medicaments.gouv.fr/
+
+User-Agent: *
+Disallow: /
