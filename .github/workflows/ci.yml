@@ -1,0 +1,187 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# N'exécute qu'un seul run à la fois par branche/PR : un nouveau push annule
+# le précédent run encore en cours.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Permissions minimales par défaut ; chaque job les resserre ou les précise
+# si besoin (aucun job de ce pipeline n'a besoin d'écrire dans le dépôt).
+permissions:
+  contents: read
+
+env:
+  # Doit rester identique à GOLANGCI_LINT_VERSION dans le Makefile (T-02).
+  GOLANGCI_LINT_VERSION: v2.12.2
+  GOVULNCHECK_VERSION: v1.7.0
+  # Épinglé indépendamment de golangci-lint : contrat OpenAPI (T-33, absent
+  # pour l'instant — voir le job `spectral`).
+  SPECTRAL_VERSION: 6.16.3
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          version: ${{ env.GOLANGCI_LINT_VERSION }}
+          args: --timeout=3m
+
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: go test -race
+        run: |
+          go test -race -count=1 -covermode=atomic -coverpkg=./... -coverprofile=coverage.out ./...
+
+      - name: Seuils de couverture (T-52, docs/11 §1)
+        run: |
+          chmod +x .github/scripts/check-coverage.sh
+          # Seuils : docs/11-strategie-de-tests.md §1. Les noms doivent être
+          # des packages réels — « internal/store/search » n'en est pas un,
+          # search.go vit dans internal/store, et le seuil était donc
+          # silencieusement ignoré.
+          ./.github/scripts/check-coverage.sh coverage.out 80 \
+            internal/bdpm=85 \
+            internal/store=80 \
+            internal/api=75
+
+      - name: Publier le rapport de couverture
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage
+          path: coverage.out
+          retention-days: 14
+          if-no-files-found: warn
+
+  vuln:
+    name: vuln
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Installer govulncheck (version épinglée, voir Makefile)
+        run: go install golang.org/x/vuln/cmd/govulncheck@${{ env.GOVULNCHECK_VERSION }}
+      - run: govulncheck ./...
+
+  trivy:
+    name: trivy (fs)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      # Périmètre : le système de fichiers du dépôt — dépendances Go via
+      # go.sum, éventuel IaC. L'image Docker n'est pas scannée : elle repose
+      # sur distroless/static, qui ne contient ni shell, ni gestionnaire de
+      # paquets, ni bibliothèque système, et le binaire est statique
+      # (CGO_ENABLED=0). Sa surface se réduit donc aux dépendances Go, déjà
+      # couvertes ici et par govulncheck.
+      - uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+
+  spectral:
+    name: spectral (openapi)
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - name: Vérifier la présence du contrat OpenAPI
+        id: openapi
+        run: |
+          if [ -f api/openapi.yaml ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "\`api/openapi.yaml\` n'existe pas encore (T-33, lot 4) : job ignoré, pas d'échec.";
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: spectral lint
+        if: steps.openapi.outputs.exists == 'true'
+        # --ruleset explicite : Spectral cherche `.spectral.yaml` dans le
+        # répertoire courant, pas à côté du document analysé. Sans cet
+        # argument il ne trouve aucun jeu de règles et sort en erreur.
+        run: |
+          npx --yes @stoplight/spectral-cli@${{ env.SPECTRAL_VERSION }} \
+            lint api/openapi.yaml --ruleset api/.spectral.yaml
+
+  # Le dépôt fusionne les PR en « squash » : le titre de la PR devient le
+  # message de commit sur `main`, et c'est donc lui que semantic-release
+  # analysera pour calculer la version. Un titre hors Conventional Commits
+  # ne casse rien, mais ne produit silencieusement aucune release — d'où ce
+  # garde-fou.
+  commit-convention:
+    name: convention de commit
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      contents: read
+    steps:
+      - name: Vérifier le titre de la pull request
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          # Types acceptés : ceux du preset « conventionalcommits ».
+          # Seuls feat, fix, perf, revert (et « ! » / BREAKING CHANGE)
+          # déclenchent une release ; les autres sont valides mais neutres.
+          pattern='^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\([a-z0-9._/-]+\))?!?: .+$'
+          if [[ ! "$PR_TITLE" =~ $pattern ]]; then
+            {
+              echo "### Titre de PR non conforme"
+              echo
+              echo '```'
+              echo "$PR_TITLE"
+              echo '```'
+              echo
+              echo "Attendu : \`type(portée facultative)!: description\`, par exemple"
+              echo "\`feat(api): expose /v1/ruptures\` ou \`fix(store): corrige le curseur périmé\`."
+              echo
+              echo "Voir [CONTRIBUTING.md](../blob/main/CONTRIBUTING.md) et"
+              echo "[Conventional Commits](https://www.conventionalcommits.org/fr/)."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::titre de PR non conforme à Conventional Commits : « $PR_TITLE »"
+            exit 1
+          fi
+          echo "Titre conforme : $PR_TITLE"

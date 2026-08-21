@@ -1,0 +1,393 @@
+{
+  "title": "meds-api",
+  "uid": "meds-api",
+  "tags": ["meds-api", "bdpm"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "description": "État du service et de la donnée. Les seuils rouges reprennent les budgets de docs/07-performance.md ; les lignes de référence des graphes de latence sont les p99 visés.",
+  "templating": {
+    "list": [
+      {
+        "name": "instance",
+        "label": "Instance",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+        "query": "label_values(meds_dataset_age_seconds, instance)",
+        "includeAll": true,
+        "multi": true,
+        "current": { "text": "All", "value": "$__all" }
+      },
+      {
+        "name": "route",
+        "label": "Route",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+        "query": "label_values(meds_http_requests_total, route)",
+        "includeAll": true,
+        "multi": true,
+        "current": { "text": "All", "value": "$__all" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "row",
+      "title": "État de la donnée",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "collapsed": false
+    },
+    {
+      "type": "stat",
+      "title": "Fraîcheur du jeu de données",
+      "description": "La métrique la plus importante du service. -1 signifie qu'aucun jeu de données n'est publié — à ne pas confondre avec une donnée fraîche. Seuils : 72 h (alerte) et 7 j (critique).",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 1 },
+      "targets": [
+        {
+          "expr": "max(meds_dataset_age_seconds{instance=~\"$instance\"})",
+          "legendFormat": "âge",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 0 },
+              { "color": "orange", "value": 259200 },
+              { "color": "red", "value": 604800 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": { "colorMode": "background", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } }
+    },
+    {
+      "type": "stat",
+      "title": "Version servie",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 1 },
+      "targets": [
+        {
+          "expr": "meds_dataset_info{instance=~\"$instance\"}",
+          "legendFormat": "{{version}}",
+          "refId": "A"
+        }
+      ],
+      "options": { "colorMode": "none", "textMode": "name", "reduceOptions": { "calcs": ["lastNotNull"] } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Volumétrie par entité",
+      "description": "Une marche brutale sur une entité signale un changement amont ; c'est ce que surveille le contrôle de variation de l'ingestion (±20 %).",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 5, "w": 12, "x": 12, "y": 1 },
+      "targets": [
+        {
+          "expr": "meds_dataset_records{instance=~\"$instance\"}",
+          "legendFormat": "{{entity}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "line", "lineWidth": 1 } }, "overrides": [] }
+    },
+    {
+      "type": "timeseries",
+      "title": "Qualité d'ingestion : rejets et hors périmètre",
+      "description": "Deux notions distinctes (ADR 0007). Les rejets sont des lignes malformées — régime normal : 0. Le hors périmètre concerne des spécialités retirées du marché : ~8 800 lignes en régime normal, ce n'est pas un défaut.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 6 },
+      "targets": [
+        {
+          "expr": "sum(meds_dataset_quarantine_records{instance=~\"$instance\"})",
+          "legendFormat": "rejets (malformation)",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(meds_dataset_out_of_scope_records{instance=~\"$instance\"})",
+          "legendFormat": "hors périmètre (référent absent)",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "short" },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "rejets (malformation)" },
+            "properties": [
+              { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    { "color": "green", "value": null },
+                    { "color": "red", "value": 100 }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Synchronisations",
+      "description": "« unchanged » est l'issue normale la plupart des jours : la source de l'ANSM ne bouge pas quotidiennement. Ce n'est pas un échec.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 6 },
+      "targets": [
+        {
+          "expr": "increase(meds_sync_attempts_total{instance=~\"$instance\"}[1h])",
+          "legendFormat": "{{result}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "short", "custom": { "drawStyle": "bars", "fillOpacity": 60 } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "failure" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "unchanged" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "blue" } }]
+          }
+        ]
+      }
+    },
+    {
+      "type": "row",
+      "title": "Trafic HTTP",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 12 },
+      "collapsed": false
+    },
+    {
+      "type": "timeseries",
+      "title": "Débit par route",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 13 },
+      "targets": [
+        {
+          "expr": "sum by (route) (rate(meds_http_requests_total{instance=~\"$instance\", route=~\"$route\"}[5m]))",
+          "legendFormat": "{{route}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] }
+    },
+    {
+      "type": "timeseries",
+      "title": "Latence p50 / p95 / p99",
+      "description": "Lignes de référence : budgets de docs/07-performance.md — 200 µs pour un lookup, 3 ms pour une recherche plein-texte.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 13 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(meds_http_request_duration_seconds_bucket{instance=~\"$instance\", route=~\"$route\"}[5m])))",
+          "legendFormat": "p50",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(meds_http_request_duration_seconds_bucket{instance=~\"$instance\", route=~\"$route\"}[5m])))",
+          "legendFormat": "p95",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(meds_http_request_duration_seconds_bucket{instance=~\"$instance\", route=~\"$route\"}[5m])))",
+          "legendFormat": "p99",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "thresholdsStyle": { "mode": "line" }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "blue", "value": 0.0002 },
+              { "color": "orange", "value": 0.003 },
+              { "color": "red", "value": 0.01 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Réponses par classe de statut",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 20 },
+      "targets": [
+        {
+          "expr": "sum by (status) (rate(meds_http_requests_total{instance=~\"$instance\"}[5m]))",
+          "legendFormat": "{{status}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "reqps", "custom": { "drawStyle": "line", "stacking": { "mode": "normal" } } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "5xx" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }]
+          }
+        ]
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Concurrence et taille des réponses",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 20 },
+      "targets": [
+        {
+          "expr": "sum(meds_http_in_flight_requests{instance=~\"$instance\"})",
+          "legendFormat": "requêtes en cours",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(meds_http_response_size_bytes_bucket{instance=~\"$instance\"}[5m])))",
+          "legendFormat": "p95 taille réponse",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    },
+    {
+      "type": "timeseries",
+      "title": "Sécurité : authentification et quota",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 20 },
+      "targets": [
+        {
+          "expr": "rate(meds_auth_failures_total{instance=~\"$instance\"}[5m])",
+          "legendFormat": "échecs d'authentification",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (scope) (rate(meds_ratelimit_rejected_total{instance=~\"$instance\"}[5m]))",
+          "legendFormat": "quota dépassé ({{scope}})",
+          "refId": "B"
+        },
+        {
+          "expr": "sum(rate(meds_http_panics_total{instance=~\"$instance\"}[5m]))",
+          "legendFormat": "paniques",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] }
+    },
+    {
+      "type": "row",
+      "title": "Recherche et ressources",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 26 },
+      "collapsed": false
+    },
+    {
+      "type": "timeseries",
+      "title": "Recherche : latence par mode",
+      "description": "Le mode « trigram » est le repli tolérant aux fautes. Il ne doit se déclencher que lorsque la recherche exacte donne moins de 5 résultats ; une proportion élevée signale un problème d'indexation.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 27 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, sum by (le, mode) (rate(meds_search_duration_seconds_bucket{instance=~\"$instance\"}[5m])))",
+          "legendFormat": "p99 {{mode}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": { "thresholdsStyle": { "mode": "line" } },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 0.003 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Part de repli trigramme",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 27 },
+      "targets": [
+        {
+          "expr": "rate(meds_search_fallback_total{instance=~\"$instance\"}[5m]) / clamp_min(rate(meds_search_results_count_count{instance=~\"$instance\"}[5m]), 0.001)",
+          "legendFormat": "part de recherches en repli",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percentunit", "max": 1, "min": 0 }, "overrides": [] }
+    },
+    {
+      "type": "timeseries",
+      "title": "Mémoire et construction du Store",
+      "description": "Budget RSS : 150 Mio en régime établi, 250 Mio pendant une bascule (deux Store coexistent quelques centaines de millisecondes). Budget de construction : 500 ms.",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 27 },
+      "targets": [
+        {
+          "expr": "process_resident_memory_bytes{instance=~\"$instance\"}",
+          "legendFormat": "RSS",
+          "refId": "A"
+        },
+        {
+          "expr": "go_memstats_heap_inuse_bytes{instance=~\"$instance\"}",
+          "legendFormat": "heap en usage",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(meds_store_build_duration_seconds_bucket{instance=~\"$instance\"}[1h]))) * 1e9",
+          "legendFormat": "p99 construction (ns, axe partagé)",
+          "refId": "C",
+          "hide": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "custom": { "thresholdsStyle": { "mode": "line" } },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 157286400 },
+              { "color": "red", "value": 419430400 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    }
+  ],
+  "__inputs": [
+    {
+      "name": "DS_PROMETHEUS",
+      "label": "Prometheus",
+      "type": "datasource",
+      "pluginId": "prometheus",
+      "pluginName": "Prometheus"
+    }
+  ]
+}

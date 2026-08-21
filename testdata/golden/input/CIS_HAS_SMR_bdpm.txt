@@ -1,0 +1,2 @@
+60002283	CT-1234	Renouvellement d'inscription	20150610	Important	Le service médical rendu reste important.
+60002284	CT-5678	Inscription	20200115	Modéré	Le service médical rendu est modéré.

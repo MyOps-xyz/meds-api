@@ -1,0 +1,2 @@
+CT-1234	http://www.has-sante.fr/portail/jcms/ct-1234
+CT-5678	http://www.has-sante.fr/portail/jcms/ct-5678

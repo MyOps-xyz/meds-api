@@ -1,0 +1,40 @@
+# Gabarit pour ajouter un second service derrière le même frontal.
+#
+# Pour l'activer :
+#   1. copier ce fichier en `<service>.caddy` (l'extension `.disabled` l'exclut du glob) ;
+#   2. remplacer le domaine et l'amont ;
+#   3. rattacher le conteneur au réseau `edge` (`networks: [edge]`, `external: true`)
+#      et lui donner un `container_name` stable — c'est ce nom que Caddy résout ;
+#   4. `make -C deploy/edge reload` (rechargement à chaud, sans coupure).
+#
+# Le certificat du nouveau domaine est obtenu automatiquement au premier appel,
+# à condition que son enregistrement DNS pointe déjà vers ce serveur.
+
+exemple.example.org {
+	import tls_config
+	import hardened
+
+	reverse_proxy mon-service:3000
+}
+
+# Variante « application web statique » :
+#
+# static.example.org {
+# 	import tls_config
+# 	import hardened
+# 	root * /srv/static
+# 	file_server
+# }
+#
+# Variante « sous-chemin » (plusieurs services sur un même domaine) :
+#
+# app.example.org {
+# 	import tls_config
+# 	import hardened
+# 	handle_path /api/* {
+# 		reverse_proxy mon-api:8080
+# 	}
+# 	handle {
+# 		reverse_proxy mon-front:3000
+# 	}
+# }

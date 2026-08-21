@@ -1,0 +1,35 @@
+# Configuration dynamique de Traefik : middlewares partagés.
+#
+# Ils reproduisent exactement les garanties du profil Caddy — en-têtes de
+# sécurité, compression, refus des endpoints d'exploitation. La parité entre
+# les deux profils est vérifiée par les tests de fumée ; sans cela, l'un des
+# deux dériverait silencieusement.
+
+http:
+  middlewares:
+    security-headers:
+      headers:
+        stsSeconds: 31536000
+        stsIncludeSubdomains: true
+        contentTypeNosniff: true
+        browserXssFilter: false
+        frameDeny: true
+        referrerPolicy: strict-origin-when-cross-origin
+        contentSecurityPolicy: "default-src 'none'; frame-ancestors 'none'"
+        customResponseHeaders:
+          Server: ""
+
+    # Refus inconditionnel : aucune adresse ne correspond à cette plage.
+    #
+    # Le filtrage par plages privées a été écarté après mesure : sous Docker
+    # Desktop, OrbStack, un userland-proxy ou un CDN, l'adresse source vue par
+    # le frontal est celle d'une passerelle privée, et la règle laisse alors
+    # fuiter /metrics vers Internet en croyant le refuser (ADR 0006, §4 du
+    # document 08). Prometheus scrute l'API en direct sur le réseau internal.
+    block-ops:
+      ipAllowList:
+        sourceRange: ["255.255.255.255/32"]
+
+    compress:
+      compress:
+        minResponseBodyBytes: 1024

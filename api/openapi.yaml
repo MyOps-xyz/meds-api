@@ -1,0 +1,1082 @@
+openapi: 3.1.0
+
+info:
+  title: meds-api
+  version: "1.0.0"
+  summary: API REST en lecture seule sur la Base de données publique des médicaments (BDPM).
+  description: |
+    API REST exposant la **Base de données publique des médicaments** (BDPM), publiée par l'ANSM
+    avec le concours de la HAS et du ministère de la Santé.
+
+    ## Avertissement
+
+    Les données proviennent de la Base de données publique des médicaments (ANSM), diffusée sous
+    Licence Ouverte (Etalab). Elles sont fournies **à titre informatif** et **ne se substituent ni
+    au Résumé des Caractéristiques du Produit, ni à l'avis d'un professionnel de santé**. Cette API
+    ne constitue pas un dispositif médical et n'apporte aucune aide à la décision clinique.
+    La date de mise à jour du jeu de données est exposée sur `/v1/dataset`.
+
+    ## Conventions
+
+    - Toutes les routes `/v1/*` exigent une clé API (`Authorization: Bearer <clé>`).
+    - Les montants sont des **entiers en centimes**, suffixés `_cents`.
+    - L'absence de valeur est toujours `null`, jamais `""` ni `0`. La distinction compte :
+      7 276 des 20 903 présentations n'ont aucun prix, et les confondre avec un prix nul
+      fausserait toute statistique.
+    - Les valeurs métier sont **conservées telles quelles** (`Autorisation active`,
+      `Commercialisée`), sans traduction ni normalisation.
+    - Les erreurs suivent la **RFC 9457** (`application/problem+json`).
+  contact:
+    name: Support meds-api
+    url: https://github.com/MyOps-xyz/meds-api
+  license:
+    name: Licence Ouverte / Open Licence (Etalab)
+    url: https://www.etalab.gouv.fr/licence-ouverte-open-licence
+
+servers:
+  - url: /
+    description: Instance courante
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Médicaments
+    description: Recherche, fiche et sous-ressources d'une spécialité.
+  - name: Présentations
+    description: Lookup par code-barres CIP7 ou CIP13.
+  - name: Référentiels
+    description: Substances, groupes génériques, disponibilité, MITM.
+  - name: Exploitation
+    description: État du service et du jeu de données.
+
+paths:
+  /v1/medicaments:
+    get:
+      tags: [Médicaments]
+      summary: Recherche et filtres
+      description: |
+        Recherche plein-texte sur la dénomination, les substances et le titulaire, combinée à des
+        filtres. **Les filtres se combinent en ET.** Sans `q`, le tri par pertinence bascule
+        automatiquement sur la dénomination.
+      operationId: listMedicaments
+      parameters:
+        - name: q
+          in: query
+          description: Recherche plein-texte. Tolère les accents et les fautes de frappe.
+          schema: { type: string, maxLength: 200 }
+          example: doliprane
+        - name: commercialise
+          in: query
+          schema: { type: boolean }
+        - name: statut_amm
+          in: query
+          schema:
+            type: string
+            enum: [active, abrogee, archivee, retiree, suspendue]
+        - name: procedure_amm
+          in: query
+          schema:
+            type: string
+            enum:
+              [
+                nationale,
+                centralisee,
+                decentralisee,
+                reconnaissance_mutuelle,
+                homeo,
+                phyto,
+                importation_parallele,
+              ]
+        - name: forme
+          in: query
+          description: Forme pharmaceutique, correspondance exacte insensible à la casse.
+          schema: { type: string }
+          example: comprimé
+        - name: voie
+          in: query
+          schema: { type: string }
+          example: orale
+        - name: titulaire
+          in: query
+          schema: { type: string }
+        - name: substance
+          in: query
+          description: Code **ou** dénomination de substance, indifféremment.
+          schema: { type: string }
+          example: PARACETAMOL
+        - name: surveillance
+          in: query
+          description: Surveillance renforcée (triangle noir).
+          schema: { type: boolean }
+        - name: mitm
+          in: query
+          description: Médicament d'intérêt thérapeutique majeur.
+          schema: { type: boolean }
+        - name: generique
+          in: query
+          schema:
+            type: string
+            enum: [princeps, generique, complementarite, substituable]
+        - name: remboursable
+          in: query
+          schema: { type: boolean }
+        - name: rupture
+          in: query
+          schema: { type: boolean }
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [pertinence, denomination, date_amm]
+            default: pertinence
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Liste paginée de spécialités.
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/MedicamentListe" }
+                  meta: { $ref: "#/components/schemas/MetaListe" }
+              example:
+                data:
+                  - cis: "60234100"
+                    denomination: "DOLIPRANE 1000 mg, comprimé"
+                    forme_pharmaceutique: comprimé
+                    voies_administration: [orale]
+                    statut_amm: Autorisation active
+                    etat_commercialisation: Commercialisée
+                    date_amm: "1995-06-12"
+                    titulaires: [OPELLA HEALTHCARE FRANCE]
+                    surveillance_renforcee: false
+                    substances: [PARACÉTAMOL]
+                    nb_presentations: 3
+                    mitm: false
+                    score: 70.3
+                    _links:
+                      self: /v1/medicaments/60234100
+                      presentations: /v1/medicaments/60234100/presentations
+                meta:
+                  total: 27
+                  limit: 20
+                  has_more: true
+                  next_cursor: eyJvIjoyMCwiaCI6IjNmMmE5YyJ9
+                  dataset_version: "2026-08-15T04:12:33Z"
+        "304": { $ref: "#/components/responses/NotModified" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "406": { $ref: "#/components/responses/NotAcceptable" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "503": { $ref: "#/components/responses/NotReady" }
+
+  /v1/medicaments/{cis}:
+    get:
+      tags: [Médicaments]
+      summary: Fiche d'un médicament
+      description: |
+        Sans `include`, seule la spécialité est renvoyée. Ce choix est délibéré : la fiche complète
+        d'un médicament à 37 présentations et 40 avis pèse plusieurs dizaines de kilooctets,
+        inutiles à un appelant qui ne veut qu'un libellé.
+      operationId: getMedicament
+      parameters:
+        - $ref: "#/components/parameters/CIS"
+        - name: include
+          in: query
+          description: Sections à inclure, séparées par des virgules, ou `all`.
+          schema:
+            type: string
+            examples: ["presentations,composition", "all"]
+      responses:
+        "200":
+          description: Fiche du médicament.
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: { $ref: "#/components/schemas/Medicament" }
+                  meta: { $ref: "#/components/schemas/MetaSimple" }
+        "304": { $ref: "#/components/responses/NotModified" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503": { $ref: "#/components/responses/NotReady" }
+
+  /v1/medicaments/{cis}/presentations:
+    get:
+      tags: [Médicaments]
+      summary: Présentations d'un médicament
+      description: Un médicament sans présentation renvoie `200` et un tableau vide, jamais `404`.
+      operationId: getMedicamentPresentations
+      parameters: [{ $ref: "#/components/parameters/CIS" }]
+      responses:
+        "200":
+          description: Présentations, prix et remboursement.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/Presentation" }
+                  meta: { $ref: "#/components/schemas/MetaSimple" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/medicaments/{cis}/composition:
+    get:
+      tags: [Médicaments]
+      summary: Composition d'un médicament
+      description: Substances actives et fractions thérapeutiques. Le `dosage` est du texte brut, jamais interprété.
+      operationId: getMedicamentComposition
+      parameters: [{ $ref: "#/components/parameters/CIS" }]
+      responses:
+        "200":
+          description: Substances actives et fractions thérapeutiques.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/Composant" }
+                  meta: { $ref: "#/components/schemas/MetaSimple" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/medicaments/{cis}/generiques:
+    get:
+      tags: [Médicaments]
+      summary: Groupe générique d'un médicament
+      description: |
+        `data` vaut `null` lorsque le médicament n'appartient à aucun groupe générique — cas de la
+        majorité des spécialités, et non une erreur.
+      operationId: getMedicamentGeneriques
+      parameters: [{ $ref: "#/components/parameters/CIS" }]
+      responses:
+        "200":
+          description: Groupe générique et médicaments équivalents.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    oneOf:
+                      - { $ref: "#/components/schemas/GroupeGenerique" }
+                      - { type: "null" }
+                  meta: { $ref: "#/components/schemas/MetaSimple" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/medicaments/{cis}/avis:
+    get:
+      tags: [Médicaments]
+      summary: Avis SMR et ASMR
+      description: Avis de service médical rendu (SMR) et d'amélioration du service médical rendu (ASMR), avec les liens vers les pages de la Commission de la transparence lorsqu'ils existent.
+      operationId: getMedicamentAvis
+      parameters: [{ $ref: "#/components/parameters/CIS" }]
+      responses:
+        "200":
+          description: Avis de la HAS, avec liens vers les pages de la Commission de la transparence.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: "#/components/schemas/Avis" }
+                  meta: { $ref: "#/components/schemas/MetaSimple" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/medicaments/{cis}/conditions:
+    get:
+      tags: [Médicaments]
+      summary: Conditions de prescription et de délivrance
+      description: Conditions de prescription et de délivrance applicables à la spécialité.
+      operationId: getMedicamentConditions
+      parameters: [{ $ref: "#/components/parameters/CIS" }]
+      responses:
+        "200":
+          description: Conditions applicables.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { type: string } }
+                  meta: { $ref: "#/components/schemas/MetaSimple" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/medicaments/{cis}/ruptures:
+    get:
+      tags: [Médicaments]
+      summary: Fiches de disponibilité d'un médicament
+      description: Ruptures de stock, tensions d'approvisionnement, arrêts de commercialisation et remises à disposition, historique compris.
+      operationId: getMedicamentRuptures
+      parameters: [{ $ref: "#/components/parameters/CIS" }]
+      responses:
+        "200":
+          description: Ruptures, tensions et remises à disposition.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/Rupture" } }
+                  meta: { $ref: "#/components/schemas/MetaSimple" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/presentations/{cip}:
+    get:
+      tags: [Présentations]
+      summary: Lookup par code-barres
+      description: |
+        Accepte indifféremment un **CIP7** (7 chiffres) ou un **CIP13** (13 chiffres) ; la
+        distinction se fait sur la longueur. C'est l'endpoint du scan en officine.
+
+        Le médicament parent est **inclus d'office** : après un scan, l'appelant veut toujours
+        savoir de quel médicament il s'agit, et lui imposer un second appel serait un défaut de
+        conception.
+      operationId: getPresentation
+      parameters:
+        - name: cip
+          in: path
+          required: true
+          schema: { type: string, pattern: "^([0-9]{7}|[0-9]{13})$" }
+          example: "3400935955838"
+      responses:
+        "200":
+          description: Présentation et son médicament parent.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: "#/components/schemas/PresentationDetail" }
+                  meta: { $ref: "#/components/schemas/MetaSimple" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/substances:
+    get:
+      tags: [Référentiels]
+      summary: Référentiel des substances
+      description: Référentiel des substances actives, construit par agrégation de la composition des spécialités. `q` filtre sur la dénomination ou le code.
+      operationId: listSubstances
+      parameters:
+        - name: q
+          in: query
+          schema: { type: string, maxLength: 200 }
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Liste paginée de substances.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/Substance" } }
+                  meta: { $ref: "#/components/schemas/MetaListe" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /v1/substances/{code}:
+    get:
+      tags: [Référentiels]
+      summary: Une substance
+      description: Une substance et le nombre de spécialités qui la contiennent.
+      operationId: getSubstance
+      parameters:
+        - name: code
+          in: path
+          required: true
+          schema: { type: string }
+          example: "42215"
+      responses:
+        "200":
+          description: Substance et nombre de spécialités la contenant.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: "#/components/schemas/Substance" }
+                  meta: { $ref: "#/components/schemas/MetaSimple" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/substances/{code}/medicaments:
+    get:
+      tags: [Référentiels]
+      summary: Spécialités contenant une substance
+      description: Spécialités contenant cette substance, paginées.
+      operationId: getSubstanceMedicaments
+      parameters:
+        - name: code
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Liste paginée de spécialités.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/MedicamentListe" } }
+                  meta: { $ref: "#/components/schemas/MetaListe" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/groupes-generiques:
+    get:
+      tags: [Référentiels]
+      summary: Référentiel des groupes génériques
+      description: |
+        Seuls les groupes comptant **au moins un membre dans le référentiel courant** sont servis :
+        1 524 sur les 1 671 présents dans la source, les 147 autres ne contenant que des
+        spécialités retirées du marché.
+      operationId: listGroupes
+      parameters:
+        - name: q
+          in: query
+          schema: { type: string, maxLength: 200 }
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Liste paginée de groupes.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/GroupeGenerique" } }
+                  meta: { $ref: "#/components/schemas/MetaListe" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /v1/groupes-generiques/{id}:
+    get:
+      tags: [Référentiels]
+      summary: Un groupe générique et ses membres
+      description: Un groupe générique et tous ses membres, avec leur type (princeps, générique) et leur état de commercialisation.
+      operationId: getGroupe
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+          example: "1"
+      responses:
+        "200":
+          description: Groupe et membres, avec leur type et leur état de commercialisation.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: "#/components/schemas/GroupeGenerique" }
+                  meta: { $ref: "#/components/schemas/MetaSimple" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/ruptures:
+    get:
+      tags: [Référentiels]
+      summary: Disponibilité des médicaments
+      description: |
+        `actives` vaut `true` par défaut : la question posée à cet endpoint est « qu'est-ce qui
+        manque en ce moment ? », pas « qu'est-ce qui a manqué un jour ». Le défaut inverse noierait
+        le signal utile.
+      operationId: listRuptures
+      parameters:
+        - name: statut
+          in: query
+          schema:
+            type: string
+            enum: [rupture, tension, arret, remise_disposition]
+        - name: actives
+          in: query
+          description: Exclut les remises à disposition passées.
+          schema: { type: boolean, default: true }
+        - name: cis
+          in: query
+          schema: { type: string, pattern: "^[0-9]{8}$" }
+        - name: depuis
+          in: query
+          description: Fiches mises à jour depuis cette date.
+          schema: { type: string, format: date }
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Liste paginée de fiches de disponibilité.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/Rupture" } }
+                  meta: { $ref: "#/components/schemas/MetaListe" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /v1/mitm:
+    get:
+      tags: [Référentiels]
+      summary: Médicaments d'intérêt thérapeutique majeur
+      description: Médicaments d'intérêt thérapeutique majeur, au sens de l'arrêté du ministère de la Santé.
+      operationId: listMITM
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Liste paginée de MITM.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/MITMListe" } }
+                  meta: { $ref: "#/components/schemas/MetaListe" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /v1/suggest:
+    get:
+      tags: [Référentiels]
+      summary: Autocomplétion
+      description: |
+        Optimisé pour la frappe au kilomètre : préfixes uniquement, charge utile minimale.
+        Le champ `highlight` est **échappé en HTML** avant insertion des balises `<em>` ; la donnée
+        source contient des caractères actifs.
+      operationId: suggest
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 200 }
+          example: dolip
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 20 }
+      responses:
+        "200":
+          description: Suggestions, médicaments et substances mêlés.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/Suggestion" } }
+                  meta: { $ref: "#/components/schemas/MetaListe" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /v1/dataset:
+    get:
+      tags: [Exploitation]
+      summary: État et provenance du jeu de données
+      description: |
+        Endpoint d'observabilité métier, et support de la conformité **Licence Ouverte** : il porte
+        la mention de la source, de l'éditeur et de la date de mise à jour.
+      operationId: getDataset
+      responses:
+        "200":
+          description: Version, fraîcheur, compteurs, qualité d'ingestion et provenance.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: "#/components/schemas/Dataset" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "503": { $ref: "#/components/responses/NotReady" }
+
+  /healthz:
+    get:
+      tags: [Exploitation]
+      summary: Sonde de vivacité
+      description: |
+        Répond `200` dès que le processus vit, **indépendamment du jeu de données**. Confondre
+        cette sonde avec `/readyz` ferait redémarrer en boucle un conteneur en cours de première
+        synchronisation.
+      operationId: healthz
+      security: []
+      responses:
+        "200":
+          description: Le processus vit.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: { status: { type: string, const: ok } }
+
+  /readyz:
+    get:
+      tags: [Exploitation]
+      summary: Sonde de disponibilité
+      description: |
+        Répond `200` dès qu'un jeu de données est publié, `503` sinon. Ne juge **pas** la
+        fraîcheur : un jeu de trois jours reste servable, et retirer le service de la rotation pour
+        cette raison transformerait un incident d'ingestion en panne totale.
+      operationId: readyz
+      security: []
+      responses:
+        "200":
+          description: Un jeu de données est servi.
+        "503":
+          description: Aucun jeu de données publié.
+
+  /metrics:
+    get:
+      tags: [Exploitation]
+      summary: Métriques Prometheus
+      description: |
+        Exposition au format Prometheus. **Ne doit pas être exposé publiquement** : le frontal le
+        refuse inconditionnellement, et Prometheus scrute l'API en direct sur le réseau interne.
+      operationId: metrics
+      security: []
+      responses:
+        "200":
+          description: Exposition Prometheus.
+          content:
+            text/plain:
+              schema: { type: string }
+
+  /openapi.json:
+    get:
+      tags: [Exploitation]
+      summary: Contrat OpenAPI
+      description: "Le contrat lui-même, au format JSON. Il est embarqué dans le binaire : il ne peut ni manquer, ni diverger de la version déployée."
+      operationId: openapiJson
+      security: []
+      responses:
+        "200":
+          description: Contrat OpenAPI 3.1.
+          content:
+            application/json:
+              schema: { type: object }
+        "304": { $ref: "#/components/responses/NotModified" }
+
+  /docs:
+    get:
+      tags: [Exploitation]
+      summary: Documentation interactive
+      description: "Page de documentation autonome. Elle ne charge **aucune ressource externe** — ni CDN, ni police, ni script — et reste donc consultable sur un réseau cloisonné."
+      operationId: docs
+      security: []
+      responses:
+        "200":
+          description: Page HTML de documentation.
+          content:
+            text/html:
+              schema: { type: string }
+
+  /admin/sync:
+    post:
+      tags: [Exploitation]
+      summary: Déclencher une synchronisation
+      description: |
+        **Asynchrone** : répond `202` immédiatement. Une ingestion prend une trentaine de secondes ;
+        tenir la connexion ouverte inviterait aux dépassements de délai côté proxy.
+
+        Exige la clé d'administration, distincte des clés API. L'endpoint répond `404` si aucune
+        clé d'administration n'est configurée — plutôt que `401`, pour ne pas révéler l'existence
+        d'une capacité d'administration inactive.
+      operationId: adminSync
+      security:
+        - adminAuth: []
+      responses:
+        "202":
+          description: Synchronisation acceptée.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      status: { type: string, const: accepted }
+                      sync_id: { type: string }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: Une synchronisation est déjà en cours.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Clé API d'au moins 32 caractères.
+    adminAuth:
+      type: http
+      scheme: bearer
+      description: Clé d'administration, distincte des clés API.
+
+  parameters:
+    CIS:
+      name: cis
+      in: path
+      required: true
+      description: Code identifiant de spécialité, huit chiffres.
+      schema: { type: string, pattern: "^[0-9]{8}$" }
+      example: "60234100"
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+    Cursor:
+      name: cursor
+      in: query
+      description: |
+        Curseur opaque de pagination. Il encode la position **et** la version du jeu de données :
+        si celui-ci est rechargé entre deux pages, le curseur est rejeté avec `cursor_stale`.
+        Mieux vaut une erreur explicite qu'une pagination silencieusement incohérente.
+      schema: { type: string }
+
+  headers:
+    ETag:
+      description: Empreinte de la réponse, à renvoyer dans `If-None-Match`.
+      schema: { type: string }
+    RequestId:
+      description: Identifiant de la requête, à communiquer au support.
+      schema: { type: string }
+
+  responses:
+    NotModified:
+      description: La ressource n'a pas changé depuis l'`ETag` fourni.
+    BadRequest:
+      description: Paramètre absent, mal formé ou hors bornes.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    Unauthorized:
+      description: Clé API absente ou invalide.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    NotFound:
+      description: Ressource inexistante.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    NotAcceptable:
+      description: L'en-tête `Accept` exclut `application/json`.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    RateLimited:
+      description: Quota dépassé.
+      headers:
+        Retry-After:
+          description: Délai conseillé avant nouvelle tentative, en secondes.
+          schema: { type: integer }
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    NotReady:
+      description: Aucun jeu de données chargé.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+
+  schemas:
+    Problem:
+      type: object
+      description: Erreur au format RFC 9457.
+      required: [type, title, status, request_id]
+      properties:
+        type: { type: string, format: uri }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        request_id: { type: string }
+      example:
+        type: https://meds-api.example/errors/not_found
+        title: Ressource introuvable
+        status: 404
+        detail: Aucune spécialité ne porte le code CIS 99999999.
+        instance: /v1/medicaments/99999999
+        request_id: 01J8Z9K2M3N4P5Q6R7S8T9V0W1
+
+    MetaSimple:
+      type: object
+      properties:
+        dataset_version: { type: string }
+
+    MetaListe:
+      type: object
+      required: [total, limit, has_more, dataset_version]
+      properties:
+        total: { type: integer }
+        limit: { type: integer }
+        has_more: { type: boolean }
+        next_cursor: { type: string }
+        dataset_version: { type: string }
+
+    MedicamentListe:
+      type: object
+      description: "Représentation allégée : la liste sert à choisir, la fiche à consulter."
+      required: [cis, denomination]
+      properties:
+        cis: { type: string }
+        denomination: { type: string }
+        forme_pharmaceutique: { type: string }
+        voies_administration: { type: array, items: { type: string } }
+        statut_amm: { type: string }
+        etat_commercialisation: { type: string }
+        date_amm: { type: [string, "null"], format: date }
+        titulaires: { type: array, items: { type: string } }
+        surveillance_renforcee: { type: boolean }
+        substances: { type: array, items: { type: string } }
+        nb_presentations: { type: integer }
+        mitm: { type: boolean }
+        score:
+          type: number
+          description: Score de pertinence. Présent uniquement si `q` est fourni.
+        _links:
+          type: object
+          properties:
+            self: { type: string }
+            presentations: { type: string }
+
+    Medicament:
+      type: object
+      required: [cis, denomination]
+      properties:
+        cis: { type: string }
+        denomination: { type: string }
+        forme_pharmaceutique: { type: string }
+        voies_administration: { type: array, items: { type: string } }
+        statut_amm: { type: string }
+        procedure_amm: { type: string }
+        etat_commercialisation: { type: string }
+        date_amm: { type: [string, "null"], format: date }
+        statut_bdm: { type: [string, "null"] }
+        numero_autorisation_europeenne: { type: [string, "null"] }
+        titulaires: { type: array, items: { type: string } }
+        surveillance_renforcee: { type: boolean }
+        mitm:
+          oneOf:
+            - { $ref: "#/components/schemas/MITM" }
+            - { type: "null" }
+        presentations: { type: array, items: { $ref: "#/components/schemas/Presentation" } }
+        composition: { type: array, items: { $ref: "#/components/schemas/Composant" } }
+        generiques:
+          oneOf:
+            - { $ref: "#/components/schemas/GroupeGenerique" }
+            - { type: "null" }
+        avis: { $ref: "#/components/schemas/Avis" }
+        conditions: { type: array, items: { type: string } }
+        ruptures: { type: array, items: { $ref: "#/components/schemas/Rupture" } }
+
+    Presentation:
+      type: object
+      required: [cip13, cip7, libelle]
+      properties:
+        cip13: { type: string }
+        cip7: { type: string }
+        libelle: { type: string }
+        statut_administratif: { type: string }
+        etat_commercialisation: { type: string }
+        date_declaration: { type: [string, "null"], format: date }
+        agrement_collectivites: { type: [boolean, "null"] }
+        taux_remboursement: { type: array, items: { type: integer } }
+        prix_medicament_cents:
+          type: [integer, "null"]
+          description: Prix en centimes. `null` si absent — jamais confondu avec zéro.
+        prix_public_cents: { type: [integer, "null"] }
+        honoraires_dispensation_cents: { type: [integer, "null"] }
+        indications_remboursement: { type: [string, "null"] }
+
+    PresentationDetail:
+      allOf:
+        - $ref: "#/components/schemas/Presentation"
+        - type: object
+          properties:
+            medicament:
+              type: object
+              properties:
+                cis: { type: string }
+                denomination: { type: string }
+                _link: { type: string }
+
+    Composant:
+      type: object
+      properties:
+        element_pharmaceutique: { type: string }
+        code_substance: { type: string }
+        denomination_substance: { type: string }
+        dosage:
+          type: string
+          description: |
+            Texte brut, jamais interprété : la source mêle notations métriques et homéopathiques,
+            et normaliser serait interpréter une donnée de santé.
+        reference_dosage: { type: string }
+        nature: { type: string, description: "`SA` (substance active) ou `FT` (fraction thérapeutique)." }
+        numero_liaison: { type: integer }
+
+    Avis:
+      type: object
+      properties:
+        smr: { type: array, items: { $ref: "#/components/schemas/AvisItem" } }
+        asmr: { type: array, items: { $ref: "#/components/schemas/AvisItem" } }
+
+    AvisItem:
+      type: object
+      properties:
+        code_dossier_has: { type: string }
+        motif_evaluation: { type: string }
+        date_avis: { type: [string, "null"], format: date }
+        valeur: { type: string }
+        niveau:
+          type: [integer, "null"]
+          description: "Niveau ASMR de 1 à 5. `null` si la valeur n'est pas un chiffre romain pur — la clé est toujours présente."
+        libelle: { type: string }
+        lien_avis_ct: { type: [string, "null"], format: uri }
+
+    GroupeGenerique:
+      type: object
+      properties:
+        id: { type: string }
+        libelle: { type: string }
+        membres:
+          type: array
+          items:
+            type: object
+            properties:
+              cis: { type: string }
+              denomination: { type: string }
+              type:
+                type: integer
+                description: "Énumération discontinue : 0, 1, 2, 4 — la valeur 3 n'existe pas."
+                enum: [0, 1, 2, 4]
+              type_libelle: { type: string }
+              ordre: { type: integer }
+              etat_commercialisation: { type: string }
+              _link: { type: string }
+
+    Rupture:
+      type: object
+      properties:
+        cis: { type: string }
+        cip13:
+          type: [string, "null"]
+          description: "`null` signifie que toute la spécialité est concernée."
+        code_statut: { type: integer }
+        statut: { type: string, enum: [rupture, tension, arret, remise_disposition] }
+        libelle: { type: string, description: Libellé dérivé du code, jamais repris de la source. }
+        libelle_source: { type: string, description: Libellé brut de la source, conservé pour l'audit. }
+        date_debut: { type: [string, "null"], format: date }
+        date_debut_approximative: { type: boolean }
+        date_mise_a_jour: { type: [string, "null"], format: date }
+        date_remise_disposition: { type: [string, "null"], format: date }
+        lien_ansm: { type: string, format: uri }
+
+    MITM:
+      type: object
+      properties:
+        code_atc: { type: string }
+        denomination: { type: string }
+        lien_bdpm: { type: string, format: uri }
+
+    MITMListe:
+      type: object
+      properties:
+        cis: { type: string }
+        code_atc: { type: string }
+        denomination: { type: string }
+        lien_bdpm: { type: string, format: uri }
+        _link: { type: string }
+
+    Substance:
+      type: object
+      properties:
+        code: { type: string }
+        denomination: { type: string }
+        nb_specialites: { type: integer }
+        _links:
+          type: object
+          properties:
+            medicaments: { type: string }
+
+    Suggestion:
+      type: object
+      properties:
+        type: { type: string, enum: [medicament, substance] }
+        cis: { type: string }
+        code: { type: string }
+        label: { type: string, description: Donnée brute, non échappée. }
+        highlight:
+          type: string
+          description: Libellé échappé en HTML, avec le préfixe entouré de `<em>`.
+
+    Dataset:
+      type: object
+      properties:
+        version: { type: string }
+        hash: { type: string }
+        generated_at: { type: string, format: date-time }
+        age_seconds: { type: integer }
+        source:
+          type: object
+          properties:
+            name: { type: string }
+            publisher: { type: string }
+            url: { type: string, format: uri }
+            licence: { type: string }
+        counts: { type: object, additionalProperties: { type: integer } }
+        quarantine:
+          type: object
+          description: "Lignes **rejetées** pour malformation. Régime normal : zéro."
+          properties:
+            total: { type: integer }
+            by_file: { type: object, additionalProperties: { type: integer } }
+            by_reason: { type: object, additionalProperties: { type: integer } }
+            reject_ratio: { type: number }
+        out_of_scope:
+          type: object
+          description: |
+            Lignes **hors périmètre** : bien formées, mais référant une spécialité absente du
+            référentiel courant — typiquement un médicament retiré du marché dont l'avis HAS
+            subsiste. Ce n'est pas un défaut de qualité, et ces lignes n'entrent pas dans le taux
+            de rejet. Environ 8 800 lignes en régime normal.
+          properties:
+            total: { type: integer }
+            by_file: { type: object, additionalProperties: { type: integer } }
+            by_reason: { type: object, additionalProperties: { type: integer } }
+            ratio: { type: number }
+        files: { type: array, items: { type: object } }
+        warnings: { type: array, items: { type: string } }
+        disclaimer: { type: string }

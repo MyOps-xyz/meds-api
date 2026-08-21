@@ -1,0 +1,17 @@
+# Normalisation par défaut des fichiers texte du dépôt.
+* text=auto eol=lf
+
+# Les échantillons figés de la source BDPM doivent traverser Git sans la moindre
+# altération : ni conversion de fin de ligne, ni ré-encodage. Huit d'entre eux
+# sont en Windows-1252 et neuf sont en CRLF (voir docs/01-analyse-source-bdpm.md).
+# Les marquer « binary » désactive à la fois la conversion eol et les diffs texte.
+testdata/golden/input/** binary
+
+# Le snapshot attendu est du NDJSON en LF strict, comparé octet pour octet.
+testdata/golden/expected/** -text eol=lf
+
+# Corpus de fuzzing : contenu arbitraire, jamais normalisé.
+testdata/fuzz/** binary
+
+# Fichiers générés, exclus des statistiques de langage.
+api/openapi.yaml linguist-generated=false

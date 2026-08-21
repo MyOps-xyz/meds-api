@@ -1,0 +1,65 @@
+name: Proposition d'évolution
+description: Proposer une fonctionnalité ou une amélioration
+labels: ["enhancement", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Le périmètre du projet est délibérément fermé et documenté dans
+        [`docs/00-vision-et-perimetre.md`](https://github.com/MyOps-xyz/meds-api/blob/main/docs/00-vision-et-perimetre.md).
+        Une proposition peut être refusée comme hors périmètre sans que sa qualité soit en cause.
+
+  - type: checkboxes
+    id: preliminaires
+    attributes:
+      label: Préalables
+      options:
+        - label: J'ai cherché une issue existante décrivant le même besoin.
+          required: true
+        - label: J'ai lu la vision et le périmètre du projet.
+          required: true
+
+  - type: textarea
+    id: besoin
+    attributes:
+      label: Besoin
+      description: "Décrivez le problème à résoudre, avant la solution envisagée. Quel usage est aujourd'hui impossible ou pénible ?"
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Solution envisagée
+      description: "Si vous avez une idée d'implémentation, décrivez-la. Pour une évolution du contrat HTTP, esquissez la requête et la réponse."
+    validations:
+      required: true
+
+  - type: dropdown
+    id: perimetre
+    attributes:
+      label: Périmètre touché
+      multiple: true
+      options:
+        - Contrat HTTP (routes, paramètres, schémas)
+        - Recherche et pertinence
+        - Ingestion et synchronisation BDPM
+        - Configuration
+        - Sécurité et authentification
+        - Observabilité
+        - Déploiement et conteneurisation
+        - Documentation
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives envisagées
+      description: "Y compris : ce qui est faisable aujourd'hui côté client, sans modifier l'API."
+
+  - type: textarea
+    id: retrocompatibilite
+    attributes:
+      label: Rétrocompatibilité
+      description: "La proposition casse-t-elle un contrat existant ? Si oui, comment l'introduire sans rupture ?"

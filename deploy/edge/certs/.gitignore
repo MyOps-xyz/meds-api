@@ -1,0 +1,5 @@
+# Le certificat d'origine et surtout sa **clé privée** ne doivent jamais être
+# versionnés. Ce répertoire est peuplé au déploiement, depuis le tableau de
+# bord Cloudflare (voir ../README.md).
+*
+!.gitignore

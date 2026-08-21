@@ -1,0 +1,3 @@
+60002283	DOLIPRANE 1000 mg, comprimé	comprimé	orale	Autorisation active	Procédure nationale	Commercialisée	19/03/1997			OPELLA HEALTHCARE FRANCE	Non
+60002284	AMLOR 5 mg, gélule	gélule	orale;intraveineuse	Autorisation active	Procédure nationale	Non commercialisée	01/06/1990	Alerte	EU/1/00/000/001	VIATRIS SANTÉ;PFIZER	Oui
+60002285	ACIDE ACÉTYLSALICYLIQUE & VITAMINE C, comprimé effervescent	comprimé effervescent	orale	Autorisation active	Procédure nationale	Commercialisée	12/06/1995			BAYER HEALTHCARE	Non

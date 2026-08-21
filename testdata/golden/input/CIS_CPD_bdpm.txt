@@ -1,0 +1,5 @@
+60002283	liste I
+60002284	prescription réservée aux spécialistes en "cardiologie"
+60002285	médicament non soumis à prescription médicale
+
+

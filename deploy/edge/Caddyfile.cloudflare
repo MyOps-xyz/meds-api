@@ -1,0 +1,94 @@
+# Frontal mutualisé — variante **Cloudflare en proxy**.
+#
+# À monter à la place de Caddyfile lorsque le trafic entre par Cloudflare :
+#
+#   docker compose -f docker-compose.yml -f compose.cloudflare.yml up -d
+#
+# Les blocs de conf.d/ sont partagés avec la variante ACME, sans modification :
+# ils importent `tls_config`, que chaque variante définit à sa façon.
+{
+	# Aucun `email` : il n'y a plus d'ACME du tout. Le certificat vient de
+	# Cloudflare, vaut quinze ans, et n'est reconnu que par Cloudflare — ce
+	# qui est exactement son usage. Corollaire agréable : le port 80 n'a plus
+	# besoin d'être joignable depuis Internet, et il n'y a plus de quota Let's
+	# Encrypt à ménager ni de renouvellement à surveiller.
+
+	servers {
+		# HTTP/1.1 et HTTP/2 uniquement. Cloudflare négocie HTTP/3 avec le
+		# navigateur, mais se connecte à l'origine en h1 ou h2 : annoncer h3
+		# ici n'apporterait rien et ajouterait un `alt-svc` trompeur, puisque
+		# le client ne parle jamais directement à ce serveur.
+		protocols h1 h2
+	}
+
+	# Cloudflare redirige déjà HTTP vers HTTPS à sa périphérie (« Always Use
+	# HTTPS »). Le port 80 de l'origine n'est pas publié ; désactiver les
+	# redirections évite que Caddy tente de l'écouter et journalise un
+	# avertissement à chaque démarrage.
+	auto_https disable_redirects
+}
+
+# ─── Fragments réutilisables ──────────────────────────────────────────────
+
+# tls_config porte la terminaison TLS. C'est le **seul** point qui diffère de
+# la variante ACME, où le même fragment est vide : les fichiers de conf.d/
+# restent ainsi identiques d'un montage à l'autre.
+#
+# Deux mécanismes distincts, à ne pas confondre :
+#
+#  1. Le **certificat d'origine** répond au mode « Full (strict) » de
+#     Cloudflare, qui vérifie le certificat présenté par l'origine. Sans lui,
+#     seul le mode « Full » fonctionnerait — chiffré mais non vérifié, donc
+#     vulnérable à une interposition entre Cloudflare et le serveur.
+#
+#  2. **Authenticated Origin Pulls** fait l'inverse : c'est Caddy qui exige un
+#     certificat client, présenté par Cloudflare et signé par son autorité.
+#     C'est ce qui empêche de contourner Cloudflare en visant directement
+#     l'adresse IP du serveur — sans quoi l'API serait servie sans WAF, sans
+#     protection contre le déni de service et sans les règles de Cloudflare.
+#     Le pare-feu restreint aux plages Cloudflare est la seconde barrière ;
+#     les deux se cumulent, aucune ne remplace l'autre.
+(tls_config) {
+	tls /certs/origin.pem /certs/origin-key.pem {
+		client_auth {
+			mode require_and_verify
+			trust_pool file {
+				pem_file /certs/cloudflare-origin-pull-ca.pem
+			}
+		}
+	}
+}
+
+# Compression et en-têtes de sécurité communs à tous les services exposés.
+#
+# HSTS est conservé bien que Cloudflare puisse l'ajouter : l'en-tête est
+# produit par l'origine, donc il survit à un changement de configuration côté
+# Cloudflare. Une garantie de sécurité qui dépend d'un réglage dans une
+# interface tierce n'en est pas tout à fait une.
+(hardened) {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+}
+
+# Endpoints d'exploitation : JAMAIS servis par le frontal public.
+#
+# Le raisonnement vaut a fortiori derrière Cloudflare : l'adresse source vue
+# par Caddy est celle d'un datacenter Cloudflare, jamais celle du client. Un
+# filtrage par `remote_ip private_ranges` n'aurait ici strictement aucun sens
+# (ADR 0006). Prometheus scrute `api:8080/metrics` en direct sur le réseau
+# interne.
+(ops-privees) {
+	@ops path /metrics /debug/*
+	respond @ops 403
+}
+
+# ─── Services ─────────────────────────────────────────────────────────────
+# Fichiers partagés avec la variante ACME, sans modification.
+
+import conf.d/*.caddy
