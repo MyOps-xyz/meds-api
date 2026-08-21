@@ -1,0 +1,71 @@
+# meds-api — aucune indexation, aucun entraînement de modèle.
+#
+# Cette API n'expose librement que /docs et /openapi.json ; tout le reste exige
+# une clé. Ces deux routes n'ont pas vocation à être indexées, ni à servir de
+# corpus d'entraînement ou de source de récupération à la volée.
+#
+# Les données servies proviennent de la BDPM, publiée en open data par l'ANSM.
+# Il faut les récupérer à la source plutôt que moissonner cette API :
+#   https://base-donnees-publique.medicaments.gouv.fr/
+#
+# Voir aussi /ai.txt, /llms.txt et l'en-tête de réponse X-Robots-Tag.
+# Les robots d'entraînement notoires reçoivent en outre un 403 au frontal —
+# mais jamais sur ce fichier : la RFC 9309 §2.3.1.4 interprète un robots.txt
+# en 4xx comme « aucune restriction », ce qui produirait l'effet inverse.
+
+# ─── Règle générale (RFC 9309) ───────────────────────────────────────────────
+# Elle suffit à tout robot conforme. Les sections nommées plus bas ne sont là
+# que pour ceux qui n'appliquent que la leur.
+
+User-agent: *
+Disallow: /
+
+# Content Signals Policy : refus explicite des trois usages en aval.
+Content-Signal: search=no, ai-input=no, ai-train=no
+
+# ─── Jetons réservés à robots.txt ────────────────────────────────────────────
+# Ceux-ci n'existent PAS comme User-Agent : ils ne se déclarent que dans ce
+# fichier, et n'ont donc aucun équivalent dans le filtrage par User-Agent du
+# frontal. Applebot-Extended ne concerne que l'entraînement ; il est distinct
+# d'Applebot, qui alimente Siri et Spotlight.
+
+User-agent: Google-Extended
+Disallow: /
+
+User-agent: Applebot-Extended
+Disallow: /
+
+# ─── Robots d'entraînement et d'assistance IA ────────────────────────────────
+
+User-agent: GPTBot
+User-agent: ChatGPT-User
+User-agent: OAI-SearchBot
+User-agent: ClaudeBot
+User-agent: Claude-User
+User-agent: Claude-SearchBot
+User-agent: anthropic-ai
+User-agent: PerplexityBot
+User-agent: Perplexity-User
+User-agent: CCBot
+User-agent: Bytespider
+User-agent: Amazonbot
+User-agent: Meta-ExternalAgent
+User-agent: Meta-ExternalFetcher
+User-agent: FacebookBot
+User-agent: Diffbot
+User-agent: cohere-ai
+User-agent: cohere-training-data-crawler
+User-agent: MistralAI-User
+User-agent: AI2Bot
+User-agent: Ai2Bot-Dolma
+User-agent: YouBot
+User-agent: DuckAssistBot
+User-agent: ImagesiftBot
+User-agent: Timpibot
+User-agent: PanguBot
+User-agent: Webzio-Extended
+User-agent: SemrushBot-OCOB
+User-agent: FirecrawlAgent
+User-agent: img2dataset
+User-agent: Omgilibot
+Disallow: /

@@ -21,6 +21,10 @@ services:
     volumes:
       - ./Caddyfile.cloudflare:/etc/caddy/Caddyfile:ro
       - ./conf.d:/etc/caddy/conf.d:ro
+      # Cette liste REMPLACE celle de docker-compose.yml : tout montage omis ici
+      # disparaît silencieusement. Les fichiers de refus d'indexation en font
+      # partie — sans eux, (indexation-refusee) servirait des 404.
+      - ../static:/srv/indexation:ro
       # Certificat d'origine Cloudflare, sa clé privée, et l'autorité qui
       # signe les certificats clients de Cloudflare. En lecture seule : le
       # conteneur n'a aucune raison d'y écrire.

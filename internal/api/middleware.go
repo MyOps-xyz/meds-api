@@ -507,6 +507,12 @@ func SecurityHeaders(next http.Handler) http.Handler {
 		// restrictive possible est aussi la seule correcte.
 		h.Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
 		h.Set("Cross-Origin-Resource-Policy", "same-origin")
+		// Refus d'indexation et de réutilisation (ADR 0008). Les frontaux le
+		// posent déjà, mais l'application ne peut pas en dépendre : elle est
+		// aussi jointe directement sur le réseau interne, et un frontal se
+		// reconfigure. Même valeur des deux côtés, donc l'écrasement par le
+		// `header` de Caddy est sans effet observable.
+		h.Set("X-Robots-Tag", "noindex, nofollow, noarchive, nosnippet, noimageindex, notranslate, noai, noimageai")
 		// Go n'émet pas d'en-tête Server par défaut ; le supprimer
 		// explicitement protège d'un intermédiaire qui en ajouterait un.
 		h.Del("Server")

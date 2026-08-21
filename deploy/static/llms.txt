@@ -1,0 +1,41 @@
+# meds-api
+
+> API REST de la Base de Données Publique des Médicaments (BDPM).
+> Aucun contenu servi par ce domaine n'est mis à disposition pour
+> l'entraînement, l'indexation ou l'inférence de modèles de langage.
+
+Le format `llms.txt` est à l'origine un index destiné à *faciliter* la lecture
+d'un site par un modèle. Ce fichier en fait l'usage inverse : il déclare
+explicitement l'absence de consentement. Il est publié ici parce qu'un agent
+qui cherche `llms.txt` doit trouver le refus plutôt qu'un 404, qu'il pourrait
+interpréter comme une absence de politique.
+
+## Politique
+
+- Entraînement de modèles : **refusé**
+- Récupération à la volée (RAG, navigation assistée, résumé à la demande) : **refusée**
+- Indexation par un moteur de recherche : **refusée**
+- Reproduction, résumé ou dérivation du contenu : **refusés**
+
+Ces refus sont exprimés de trois autres façons, toutes équivalentes :
+
+- l'en-tête de réponse `X-Robots-Tag`, présent sur chaque réponse du domaine ;
+- [/robots.txt](/robots.txt), qui porte aussi un `Content-Signal` ;
+- [/ai.txt](/ai.txt), au format Spawning.
+
+Les robots d'entraînement notoires reçoivent en outre un `403` au frontal. Ce
+filtrage est fondé sur le champ `User-Agent` : il ne prétend pas être infaillible,
+il rend simplement le refus effectif pour ceux qui ignorent les trois déclarations
+ci-dessus.
+
+## Accès légitime aux données
+
+Il n'y a aucune raison de moissonner cette API : elle ne fait que redistribuer un
+jeu de données public. La source, complète et sans restriction d'usage, est
+publiée en open data par l'ANSM :
+
+- <https://base-donnees-publique.medicaments.gouv.fr/>
+
+## Contact
+
+Voir `SECURITY.md` dans le dépôt du projet.

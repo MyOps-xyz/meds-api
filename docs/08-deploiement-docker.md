@@ -410,12 +410,18 @@ avec son propre cycle de vie, et les applications s'y branchent par un réseau D
 | `deploy/edge/Caddyfile` | Global ACME + fragments réutilisables, puis `import conf.d/*.caddy` |
 | `deploy/edge/conf.d/meds-api.caddy` | Le bloc de site de meds-api |
 | `deploy/edge/conf.d/*.caddy` | **Un fichier par service supplémentaire** |
+| `deploy/static/` | `robots.txt`, `llms.txt`, `ai.txt` — monté `:ro` sur `/srv/indexation` |
 | `deploy/edge/compose.meds-api.yml` | Superposition rattachant l'API au réseau `edge` |
 | `deploy/edge/Makefile` | `up`, `reload`, `validate`, `routes`, `ca`, `backup` |
 
-Le `Caddyfile` ne déclare aucun nom d'hôte : il n'expose que deux fragments, `hardened` (compression
-et en-têtes de sécurité) et `ops-privees` (refus de `/metrics` et `/debug/*`), que chaque bloc de
-`conf.d/` importe. La configuration commune vit à un seul endroit ; ajouter un service ne la
+Le `Caddyfile` ne déclare aucun nom d'hôte : il n'expose que quatre fragments — `hardened`
+(compression et en-têtes de sécurité), `indexation-refusee` (`X-Robots-Tag` et service de
+`/robots.txt`, `/llms.txt`, `/ai.txt`), `anti-ia` (`403` sur les robots d'entraînement notoires)
+et `ops-privees` (refus de `/metrics` et `/debug/*`) — que chaque bloc de `conf.d/` importe.
+
+`deploy/static/` est **hors** de `deploy/edge/` à dessein : le profil `caddy` dédié monte le même
+dossier, de sorte que les deux frontaux servent le même refus sans duplication ([ADR
+0008](adr/0008-refus-indexation-et-entrainement-ia.md)). La configuration commune vit à un seul endroit ; ajouter un service ne la
 touche pas.
 
 ### 6.2 Mise en service
@@ -444,15 +450,30 @@ son enregistrement DNS pointe déjà vers ce serveur.
 ```caddyfile
 blog.example.org {
     import hardened
+    import indexation-refusee
+    import anti-ia
     reverse_proxy blog:3000
 }
 ```
+
+Les deux imports d'indexation sont facultatifs : un service qui, lui, **doit** être référencé les
+omet, et `hardened` ne porte alors aucune directive d'indexation.
+
+C'est délibérément que `X-Robots-Tag` vit dans `indexation-refusee` plutôt que dans `hardened`.
+Un bloc `header` contenant `-Server` est marqué `deferred` par Caddy et appliqué à l'écriture de
+la réponse, donc **après** tout `header` posé plus loin dans le bloc de site : s'il portait
+`X-Robots-Tag`, aucun service ne pourrait le neutraliser. Vérifié le 21/08/2026 —
+`header -X-Robots-Tag`, l'écrasement par une autre valeur et la sous-directive `defer` échouent
+tous les trois. L'import optionnel est la seule composition qui fonctionne.
 
 ### 6.4 Ce qui est fermé par défaut
 
 - **Domaine absent de `conf.d/`** : aucun certificat n'est demandé pour lui et la poignée de main
   TLS échoue. Fermé, pas « ouvert avec une page d'erreur ».
 - **`/metrics` et `/debug/*`** : `403` inconditionnel, pour la raison exposée au §4.
+- **Indexation et entraînement IA** : `X-Robots-Tag` sur chaque réponse, trois fichiers de refus
+  servis à la racine, et `403` sur les robots d'entraînement notoires — sauf sur ces trois
+  fichiers, qu'ils doivent pouvoir lire ([ADR 0008](adr/0008-refus-indexation-et-entrainement-ia.md)).
 - **Aucune application ne publie de port hôte** : le frontal est leur unique voie d'accès, et une
   règle de pare-feu suffit à décrire toute la surface exposée de la machine.
 
@@ -471,6 +492,33 @@ Configuration éprouvée le 15/08/2026 sur `caddy:2.11.4-alpine`, deux services 
 | Certificats | un par domaine, SAN distincts, AC interne |
 | Domaine inconnu | poignée de main TLS refusée |
 | Conteneur `read_only` + `cap_drop: ALL` | démarre et passe `healthy` |
+
+Refus d'indexation et d'entraînement ([ADR 0008](adr/0008-refus-indexation-et-entrainement-ia.md)),
+éprouvé le 21/08/2026 sur le même montage — 23 contrôles, 0 échec :
+
+| Vérification | Résultat |
+|---|---|
+| `X-Robots-Tag` sur une route applicative | `noindex, nofollow, …, noai, noimageai` |
+| `/robots.txt`, `/llms.txt`, `/ai.txt` | `200`, `text/plain; charset=utf-8` |
+| Les mêmes, avec `User-Agent: GPTBot` | `200` — **le contrôle décisif**, voir ci-dessous |
+| `GPTBot`, `ClaudeBot`, `CCBot`, `Bytespider`, `PerplexityBot`, `meta-externalagent` sur `/docs` | `403` |
+| `Googlebot` et `curl` sur `/docs` | `200` — le filtrage `User-Agent` ne vise que l'entraînement |
+| `Server` sur route applicative, `403`, fichier statique | absent |
+| `Server` sur la redirection `80→443` | absent après correctif ; **présent avant** |
+| `/metrics` et `/debug/pprof/` | `403`, inchangés |
+
+Deux points méritent d'être retenus :
+
+- **`robots.txt` doit répondre `200` au robot qu'on refuse par ailleurs.** La RFC 9309 §2.3.1.4
+  lit un `robots.txt` en `4xx` comme « aucune restriction » : un `403` y produirait l'inverse de
+  l'effet recherché. L'ordre est obtenu par construction, `handle` précédant `respond` dans
+  l'ordre des directives de Caddy — pas par la position des `import` dans le fichier.
+- **La redirection `80→443` générée par Caddy émettait `Server: Caddy`.** Elle vit hors de tout
+  bloc de site et n'exécute donc aucune directive `header` : c'était la seule réponse du frontal
+  à porter encore l'en-tête. Corrigée par un bloc `http://` explicite et
+  `auto_https disable_redirects`. Ce réglage **ne casse pas** le challenge ACME HTTP-01, dont la
+  route est interceptée avant le routage : vérifié le 21/08/2026 contre un ACME réel (Pebble,
+  `httpPort: 80`), qui a émis un certificat avec ce montage actif.
 
 ### 6.6 Ce que ce montage coûte
 

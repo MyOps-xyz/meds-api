@@ -721,6 +721,15 @@ func TestSecurityHeaders(t *testing.T) {
 	if rec.Header().Get("Content-Security-Policy") == "" {
 		t.Error("Content-Security-Policy absente")
 	}
+	// Refus d'indexation et d'entraînement (ADR 0008). L'assertion porte sur
+	// `noindex` et `noai` uniquement : la liste complète est arbitraire et
+	// destinée à évoluer, alors que ces deux jetons sont le fond de la
+	// politique. Les frontaux posent le même en-tête ; l'application ne peut
+	// pas s'en remettre à eux, elle est aussi jointe sur le réseau interne.
+	if xrt := rec.Header().Get("X-Robots-Tag"); !strings.Contains(xrt, "noindex") ||
+		!strings.Contains(xrt, "noai") {
+		t.Errorf("X-Robots-Tag = %q, veut au moins noindex et noai", xrt)
+	}
 	if rec.Header().Get("Server") != "" {
 		t.Error("l'en-tête Server ne doit pas être émis")
 	}

@@ -6,6 +6,8 @@
 {$MEDS_DOMAIN:meds.localhost} {
 	import tls_config
 	import hardened
+	import indexation-refusee
+	import anti-ia
 	import ops-privees
 
 	reverse_proxy meds-api:8080 {

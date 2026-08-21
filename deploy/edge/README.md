@@ -49,11 +49,32 @@ docker compose -f docker-compose.yml -f deploy/edge/compose.meds-api.yml up -d
 
    ```caddyfile
    blog.example.org {
-       import tls_config    # vide en mode ACME, certificat d'origine derrière Cloudflare
+       import tls_config           # vide en mode ACME, certificat d'origine derrière Cloudflare
        import hardened
+       import indexation-refusee   # sert /robots.txt, /llms.txt, /ai.txt
+       import anti-ia              # 403 sur les robots d'entraînement notoires
        reverse_proxy blog:3000
    }
    ```
+
+   Les deux derniers imports sont **facultatifs**. Un service qui, lui, doit être référencé les
+   omet simplement — `hardened` ne porte aucune directive d'indexation :
+
+   ```caddyfile
+   vitrine.example.org {
+       import tls_config
+       import hardened          # compression, HSTS, nosniff, -Server
+       reverse_proxy vitrine:3000
+   }
+   ```
+
+   C'est la raison pour laquelle `X-Robots-Tag` vit dans `indexation-refusee` et non dans
+   `hardened` : un bloc `header` contenant `-Server` est marqué `deferred` par Caddy, donc
+   appliqué à l'écriture de la réponse, **après** tout `header` posé plus loin dans le bloc de
+   site. S'il portait `X-Robots-Tag`, un service à indexer ne pourrait plus le neutraliser —
+   vérifié le 21/08/2026 : `header -X-Robots-Tag`, l'écrasement par une autre valeur et la
+   sous-directive `defer` échouent tous les trois. Rendre l'import optionnel est la seule
+   composition qui marche.
 
 2. Rattacher le conteneur au réseau `edge` avec un `container_name` stable — c'est ce nom que
    Caddy résout :
@@ -123,6 +144,13 @@ depuis l'ANSM.
 
 - **Domaine non déclaré dans `conf.d/`** → aucun certificat demandé, poignée de main TLS refusée.
   Vérifié : `curl https://inconnu.localhost/` échoue au niveau TLS.
+- **Indexation et entraînement IA** → `X-Robots-Tag` sur chaque réponse (via `indexation-refusee`),
+  `/robots.txt`, `/llms.txt` et `/ai.txt` servis depuis `../static/`, et `403` sur une liste de
+  robots d'entraînement. **Sauf sur ces trois fichiers**, qu'un robot refusé doit pouvoir lire :
+  la RFC 9309 §2.3.1.4 interprète un `robots.txt` en `4xx` comme « aucune restriction », donc un
+  `403` y ferait exactement l'inverse. L'ordre est garanti par construction — `handle` précède
+  `respond` dans l'ordre des directives de Caddy —, pas par la position des `import`.
+  Portée et limites : [ADR 0008](../../docs/adr/0008-refus-indexation-et-entrainement-ia.md).
 - **`/metrics` et `/debug/*`** → `403` inconditionnel depuis le frontal public. Prometheus scrute
   `api:8080/metrics` **en direct** sur le réseau `internal`, sans passer par ici.
 
@@ -131,6 +159,28 @@ depuis l'ANSM.
   passerelle privée. La règle laisse alors fuiter `/metrics` vers Internet **en croyant le
   refuser** — mesuré le 15/08/2026, `curl https://…/metrics` renvoyait `200` au lieu de `403`.
   Un refus inconditionnel ne dépend d'aucune hypothèse sur la topologie réseau.
+
+---
+
+## Vérifications du 21/08/2026 — refus d'indexation
+
+23 contrôles, 0 échec, sur `caddy:2.11.4-alpine` :
+
+| Vérification | Résultat |
+|---|---|
+| `X-Robots-Tag` sur une route applicative | présent, valeur complète |
+| `/robots.txt`, `/llms.txt`, `/ai.txt` | `200`, `text/plain; charset=utf-8` |
+| Les mêmes avec `User-Agent: GPTBot` | `200` ← contrôle décisif |
+| `GPTBot`, `ClaudeBot`, `CCBot`, `Bytespider`, `PerplexityBot`, `meta-externalagent` sur `/docs` | `403` |
+| `Googlebot` et `curl` sur `/docs` | `200` — seul l'entraînement est filtré |
+| `Server` sur route, `403`, fichier statique, **et redirection `80→443`** | absent |
+| `/metrics`, `/debug/pprof/` | `403`, inchangés |
+
+La redirection `80→443` émettait `Server: Caddy` avant correctif : générée par `auto_https`, elle
+vit hors de tout bloc de site et n'exécute aucune directive `header`. Reprise par un bloc
+`http://` explicite. Le `auto_https disable_redirects` que cela impose **ne casse pas** le
+challenge ACME HTTP-01 — vérifié contre un ACME réel (Pebble sur `httpPort: 80`), certificat émis
+avec ce montage actif : la route du challenge est interceptée avant le routage.
 
 ---
 

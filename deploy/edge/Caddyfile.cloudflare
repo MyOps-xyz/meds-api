@@ -25,6 +25,12 @@
 	# HTTPS »). Le port 80 de l'origine n'est pas publié ; désactiver les
 	# redirections évite que Caddy tente de l'écouter et journalise un
 	# avertissement à chaque démarrage.
+	#
+	# Corollaire : la variante ACME porte, elle, un bloc `http://` explicite pour
+	# que sa redirection n'émette pas `Server: Caddy` — la redirection générée par
+	# Caddy vit hors de tout bloc de site et n'exécute aucune directive `header`.
+	# Ici ce bloc serait inutile : le port 80 n'est pas publié, et Cloudflare
+	# redirige à sa périphérie.
 	auto_https disable_redirects
 }
 
@@ -74,6 +80,78 @@
 		Referrer-Policy "strict-origin-when-cross-origin"
 		-Server
 	}
+}
+
+# Fichiers de refus d'indexation et d'entraînement : /robots.txt, /llms.txt, /ai.txt.
+#
+# Fragment identique à celui de la variante ACME — les fichiers de conf.d/ sont
+# partagés, donc les fragments qu'ils importent doivent exister des deux côtés.
+#
+# Servis par le frontal et non par l'application : ils décrivent le DOMAINE, pas
+# l'API. Le contenu vit dans deploy/static/, monté en lecture seule sur
+# /srv/indexation.
+#
+# Deux subtilités d'ordonnancement, toutes deux nécessaires :
+#
+#  1. `file_server` est ordonné APRÈS `reverse_proxy` : sans `handle`, le
+#     `reverse_proxy` nu des blocs de conf.d/ capterait /robots.txt en premier
+#     et l'API répondrait 404. `handle`, lui, précède `reverse_proxy`.
+#
+#  2. `handle` est ordonné avant `respond`, donc ce fragment passe AVANT le 403
+#     de (anti-ia) : un robot par ailleurs refusé lit quand même robots.txt.
+#     Indispensable — la RFC 9309 §2.3.1.4 interprète un robots.txt en 4xx comme
+#     « aucune restriction ».
+#
+# Ne jamais introduire un `handle` SANS matcher dans un bloc de site : il
+# capterait tout avant le `respond @ops 403` de (ops-privees).
+#
+# Note Cloudflare : le cache de Cloudflare peut servir ces fichiers depuis sa
+# périphérie. C'est sans conséquence — leur contenu est statique et public — mais
+# une modification met jusqu'à la durée de cache à se propager. Purger l'URL si
+# le changement doit être immédiat.
+(indexation-refusee) {
+	# L'en-tête vit ICI et non dans (hardened) : un `header` contenant `-Server`
+	# est marqué `deferred` par Caddy, donc appliqué à l'écriture de la réponse,
+	# APRÈS tout `header` posé plus loin dans le bloc de site. Un service à
+	# indexer ne pourrait alors plus le neutraliser — ni par `-X-Robots-Tag`, ni
+	# par écrasement, ni avec `defer`. Vérifié le 21/08/2026 : les trois échouent.
+	#
+	# En le plaçant dans ce fragment, la composition redevient explicite :
+	# un service à référencer n'importe simplement pas `indexation-refusee`.
+	#
+	# `noai` et `noimageai` ne sont pas normalisés (convention Spawning) :
+	# inoffensifs pour les autres robots, lus par ceux qui les comprennent.
+	header X-Robots-Tag "noindex, nofollow, noarchive, nosnippet, noimageindex, notranslate, noai, noimageai"
+
+	@fichiers-indexation path /robots.txt /llms.txt /ai.txt
+	handle @fichiers-indexation {
+		root * /srv/indexation
+		# Explicite plutôt que déduit de l'extension : avec `nosniff`, un
+		# Content-Type erroné rendrait le fichier illisible sans recours.
+		header Content-Type "text/plain; charset=utf-8"
+		file_server
+	}
+}
+
+# Robots d'entraînement notoires : refus EFFECTIF, pas seulement déclaratif.
+#
+# Complète (indexation-refusee) et X-Robots-Tag, ne les remplace pas.
+#
+# Derrière Cloudflare, ce filtrage fait doublon avec la règle « AI Scrapers and
+# Crawlers » du tableau de bord, qui est plus à jour et agit avant d'atteindre
+# l'origine. Il est conservé ici pour la même raison que HSTS : une garantie qui
+# dépend d'un réglage dans une interface tierce n'en est pas tout à fait une.
+#
+# Limites assumées (ADR 0008) : la liste vieillit, et un agent qui falsifie son
+# User-Agent passe au travers.
+#
+# `Google-Extended` et `Applebot-Extended` sont volontairement ABSENTS : jetons
+# robots.txt, pas User-Agent. `ChatGPT-User`, `Claude-User` et `Perplexity-User`
+# désignent des récupérations demandées par un humain — les refuser est un choix
+# délibéré, à retirer du motif pour laisser passer la consultation à la demande.
+(anti-ia) {
+	@robots-ia header_regexp User-Agent "(?i)(GPTBot|ChatGPT-User|OAI-SearchBot|ClaudeBot|Claude-User|Claude-SearchBot|anthropic-ai|PerplexityBot|Perplexity-User|CCBot|Bytespider|Amazonbot|Meta-External|FacebookBot|Diffbot|cohere-ai|cohere-training-data-crawler|MistralAI-User|AI2Bot|Ai2Bot-Dolma|YouBot|DuckAssistBot|ImagesiftBot|Timpibot|PanguBot|Webzio-Extended|SemrushBot-OCOB|FirecrawlAgent|img2dataset|Omgilibot)"
+	respond @robots-ia 403
 }
 
 # Endpoints d'exploitation : JAMAIS servis par le frontal public.

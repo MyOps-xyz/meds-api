@@ -16,6 +16,22 @@
 	servers {
 		protocols h1 h2 h3
 	}
+
+	# Redirection HTTP→HTTPS reprise à la main juste en dessous : celle que Caddy
+	# génère seul vit hors de tout bloc de site, n'exécute aucune directive
+	# `header`, et émet `Server: Caddy`. Même correctif que deploy/edge/Caddyfile.
+	#
+	# Sans effet sur le challenge ACME HTTP-01 : sa route est interceptée avant
+	# le routage. Vérifié le 21/08/2026 contre un ACME réel (Pebble), certificat
+	# émis avec ce réglage actif — voir 08 §6.5.
+	auto_https disable_redirects
+}
+
+# Redirection HTTP→HTTPS, explicite et sans signature de serveur.
+# Les autres en-têtes de durcissement n'ont pas de sens sur un 301 sans contenu.
+http:// {
+	header -Server
+	redir https://{host}{uri} permanent
 }
 
 {$DOMAIN} {
@@ -25,8 +41,43 @@
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
 		X-Content-Type-Options "nosniff"
 		Referrer-Policy "strict-origin-when-cross-origin"
+		# Refus d'indexation et de réutilisation, sur CHAQUE réponse du domaine.
+		# `noai` et `noimageai` ne sont pas normalisés (convention Spawning) :
+		# inoffensifs pour les autres robots, lus par ceux qui les comprennent.
+		X-Robots-Tag "noindex, nofollow, noarchive, nosnippet, noimageindex, notranslate, noai, noimageai"
 		-Server
 	}
+
+	# Fichiers de refus d'indexation : /robots.txt, /llms.txt, /ai.txt.
+	# Contenu partagé avec le frontal mutualisé (deploy/static/, monté sur
+	# /srv/indexation) : une seule source pour les deux profils Caddy.
+	#
+	# Le `handle` n'est pas décoratif. `file_server` est ordonné APRÈS
+	# `reverse_proxy` : sans lui, le `reverse_proxy` ci-dessous capterait
+	# /robots.txt et l'API répondrait 404. Et parce que `handle` précède
+	# `respond`, ces fichiers restent servis en 200 à un robot par ailleurs
+	# refusé plus bas — la RFC 9309 §2.3.1.4 lit un robots.txt en 4xx comme
+	# « aucune restriction », un 403 ici serait contre-productif.
+	#
+	# Ne jamais ajouter de `handle` sans matcher ici : il capterait tout avant
+	# le `respond @ops 403` ci-dessous et ferait fuiter /metrics.
+	@fichiers-indexation path /robots.txt /llms.txt /ai.txt
+	handle @fichiers-indexation {
+		root * /srv/indexation
+		header Content-Type "text/plain; charset=utf-8"
+		file_server
+	}
+
+	# Robots d'entraînement notoires : refus effectif, pas seulement déclaratif.
+	# Motif identique à celui du frontal mutualisé (ADR 0008) — toute
+	# modification doit être reportée dans deploy/edge/Caddyfile{,.cloudflare}.
+	#
+	# `Google-Extended` et `Applebot-Extended` en sont volontairement absents :
+	# jetons robots.txt, pas User-Agent. `ChatGPT-User`, `Claude-User` et
+	# `Perplexity-User` désignent des récupérations demandées par un humain ;
+	# les refuser est délibéré, à retirer pour laisser passer la consultation.
+	@robots-ia header_regexp User-Agent "(?i)(GPTBot|ChatGPT-User|OAI-SearchBot|ClaudeBot|Claude-User|Claude-SearchBot|anthropic-ai|PerplexityBot|Perplexity-User|CCBot|Bytespider|Amazonbot|Meta-External|FacebookBot|Diffbot|cohere-ai|cohere-training-data-crawler|MistralAI-User|AI2Bot|Ai2Bot-Dolma|YouBot|DuckAssistBot|ImagesiftBot|Timpibot|PanguBot|Webzio-Extended|SemrushBot-OCOB|FirecrawlAgent|img2dataset|Omgilibot)"
+	respond @robots-ia 403
 
 	# Endpoints d'exploitation : jamais servis par le frontal.
 	# Le filtrage par `remote_ip private_ranges` est volontairement écarté : sous un

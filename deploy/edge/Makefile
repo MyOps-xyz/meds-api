@@ -31,6 +31,7 @@ validate-cloudflare: ## Valider la configuration Cloudflare sans redémarrer
 	docker run --rm -e MEDS_DOMAIN=$${MEDS_DOMAIN:-exemple.test} \
 		-v $(PWD)/Caddyfile.cloudflare:/etc/caddy/Caddyfile:ro \
 		-v $(PWD)/conf.d:/etc/caddy/conf.d:ro \
+		-v $(PWD)/../static:/srv/indexation:ro \
 		-v $(PWD)/certs:/certs:ro \
 		caddy:2.11.4-alpine caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 
@@ -49,7 +50,7 @@ reload: validate ## Recharger à chaud après ajout ou modification d'un service
 
 .PHONY: fmt
 fmt: ## Reformater les fichiers Caddyfile (`caddy fmt` n'accepte qu'un fichier à la fois)
-	@for f in Caddyfile conf.d/*.caddy; do \
+	@for f in Caddyfile Caddyfile.cloudflare conf.d/*.caddy; do \
 		docker run --rm -v $(PWD):/w -w /w caddy:2.11.4-alpine \
 			caddy fmt --overwrite "$$f" && echo "  formaté : $$f"; \
 	done
