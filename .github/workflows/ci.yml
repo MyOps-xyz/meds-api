@@ -55,6 +55,16 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      # Garde-fou : `go test ./...` compile ce qu'il trouve, mais ne dit rien
+      # d'un paquet ABSENT du dépôt. Les deux paquets `main` ont manqué
+      # pendant trois commits — exclus par un motif .gitignore non ancré — et
+      # seule la release s'en est aperçue, au moment de produire les
+      # binaires. Nommer les paquets explicitement fait échouer ce job si
+      # l'un d'eux disparaît. Compilation pour l'hôte uniquement : la
+      # compilation croisée reste réservée à la release.
+      - name: Compilation des commandes
+        run: go build -o "${RUNNER_TEMP}/cmdbin/" ./cmd/meds-api ./cmd/bdpm-sync
+
       - name: go test -race
         run: |
           go test -race -count=1 -covermode=atomic -coverpkg=./... -coverprofile=coverage.out ./...
