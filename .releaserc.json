@@ -71,8 +71,7 @@
     [
       "@semantic-release/exec",
       {
-        "prepareCmd": "./.github/scripts/prepare-release.sh ${nextRelease.version}",
-        "publishCmd": "echo \"version=${nextRelease.version}\" >> \"${GITHUB_OUTPUT:-/dev/null}\""
+        "prepareCmd": "./.github/scripts/prepare-release.sh ${nextRelease.version}"
       }
     ],
     [
