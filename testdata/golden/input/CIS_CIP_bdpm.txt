@@ -1,0 +1,4 @@
+60002283	3000001	plaquette(s) thermoformée(s) de 8 comprimé(s)	Présentation active	Déclaration de commercialisation	16/03/2011	3400930000011	oui	65 %	1,78	2,80	1,02	
+60002283	3000002	plaquette de 16 comprimé(s)	Présentation active	Déclaration de commercialisation	16/03/2011	3400930000028	non	65%				
+60002284	3000003	flacon(s) de 30 gélule(s)	Présentation active	Déclaration de commercialisation	01/01/2001	3400930000035	inconnu	30 %	1 234,56	1 500,00	1,02	Prise en charge sous conditions
+99999999	3000004	boîte orpheline	Présentation active	Déclaration de commercialisation	01/01/2020	3400930000042	oui	65 %	1,00	1,50	1,02	

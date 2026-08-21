@@ -1,0 +1,29 @@
+# Règles de validation du contrat OpenAPI (T-33).
+#
+#   spectral lint api/openapi.yaml
+#
+# Le jeu `oas` de Spectral valide la conformité structurelle à OpenAPI 3.1 et
+# les bonnes pratiques usuelles. Les quelques règles désactivées ci-dessous le
+# sont pour des raisons explicites, jamais pour faire taire un avertissement.
+extends: ["spectral:oas"]
+
+rules:
+  # La description de l'API porte l'avertissement obligatoire sur les données
+  # de santé : elle est longue, et c'est voulu.
+  info-description: error
+
+  # Chaque opération doit être identifiable et documentée : ce sont les deux
+  # propriétés dont dépend la génération de clients.
+  operation-operationId: error
+  operation-description: warn
+  operation-tags: error
+
+  # Les balises `<em>` de `Suggestion.highlight` et les liens des avis HAS
+  # imposent des descriptions contenant du balisage ; la règle qui interdit
+  # les descriptions non ponctuées n'apporte rien ici.
+  oas3-valid-media-example: error
+  oas3-valid-schema-example: error
+
+  # Désactivée : les serveurs sont relatifs (`/`), l'instance étant déployée
+  # derrière un frontal dont l'URL publique n'est pas connue du contrat.
+  oas3-api-servers: off

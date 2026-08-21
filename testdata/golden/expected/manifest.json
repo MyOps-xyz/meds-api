@@ -1,0 +1,120 @@
+{
+  "version": "2026-08-15T04:12:33Z",
+  "hash": "golden",
+  "generated_at": "2026-08-15T04:12:33Z",
+  "generator": "golden/1.0.0",
+  "source_files": [
+    {
+      "name": "CIS_bdpm.txt",
+      "sha256": "x",
+      "bytes": 511,
+      "lines": 3,
+      "encoding": "windows-1252",
+      "line_ending": "crlf"
+    },
+    {
+      "name": "CIS_CIP_bdpm.txt",
+      "sha256": "x",
+      "bytes": 643,
+      "lines": 4,
+      "encoding": "utf-8",
+      "line_ending": "crlf"
+    },
+    {
+      "name": "CIS_COMPO_bdpm.txt",
+      "sha256": "x",
+      "bytes": 283,
+      "lines": 4,
+      "encoding": "windows-1252",
+      "line_ending": "crlf"
+    },
+    {
+      "name": "CIS_HAS_SMR_bdpm.txt",
+      "sha256": "x",
+      "bytes": 191,
+      "lines": 2,
+      "encoding": "windows-1252",
+      "line_ending": "crlf"
+    },
+    {
+      "name": "CIS_HAS_ASMR_bdpm.txt",
+      "sha256": "x",
+      "bytes": 170,
+      "lines": 2,
+      "encoding": "windows-1252",
+      "line_ending": "crlf"
+    },
+    {
+      "name": "HAS_LiensPageCT_bdpm.txt",
+      "sha256": "x",
+      "bytes": 108,
+      "lines": 2,
+      "encoding": "utf-8",
+      "line_ending": "crlf"
+    },
+    {
+      "name": "CIS_GENER_bdpm.txt",
+      "sha256": "x",
+      "bytes": 178,
+      "lines": 3,
+      "encoding": "windows-1252",
+      "line_ending": "crlf"
+    },
+    {
+      "name": "CIS_CPD_bdpm.txt",
+      "sha256": "x",
+      "bytes": 144,
+      "lines": 3,
+      "encoding": "windows-1252",
+      "line_ending": "crlf"
+    },
+    {
+      "name": "CIS_CIP_Dispo_Spec.txt",
+      "sha256": "x",
+      "bytes": 204,
+      "lines": 2,
+      "encoding": "windows-1252",
+      "line_ending": "crlf"
+    },
+    {
+      "name": "CIS_MITM.txt",
+      "sha256": "x",
+      "bytes": 158,
+      "lines": 2,
+      "encoding": "utf-8",
+      "line_ending": "lf"
+    }
+  ],
+  "counts": {
+    "avis_asmr": 2,
+    "avis_smr": 2,
+    "composants": 4,
+    "conditions": 3,
+    "groupes_generiques": 1,
+    "mitm": 2,
+    "presentations": 3,
+    "ruptures": 2,
+    "specialites": 3,
+    "substances": 4
+  },
+  "quarantine": {
+    "total": 0,
+    "by_file": {},
+    "by_reason": {},
+    "reject_ratio": 0
+  },
+  "out_of_scope": {
+    "total": 2,
+    "by_file": {
+      "CIS_CIP_bdpm.txt": 1,
+      "CIS_GENER_bdpm.txt": 1
+    },
+    "by_reason": {
+      "cis_orphelin": 2
+    },
+    "ratio": 0.07407407407407407
+  },
+  "warnings": [
+    "2 ligne(s) hors périmètre pour motif « cis_orphelin » — non servies, non comptées comme rejets"
+  ]
+}

@@ -1,0 +1,2 @@
+60002283	N02BE01	PARACETAMOL	http://base-donnees-publique.medicaments.gouv.fr/x
+60002284	C08CA01	AMLODIPINE	http://base-donnees-publique.medicaments.gouv.fr/y

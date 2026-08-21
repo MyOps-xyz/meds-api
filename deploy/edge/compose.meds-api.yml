@@ -1,0 +1,25 @@
+# Superposition à appliquer au docker-compose.yml racine pour brancher meds-api
+# sur le frontal mutualisé de `deploy/edge/`.
+#
+#   docker compose -f docker-compose.yml -f deploy/edge/compose.meds-api.yml up -d
+#
+# Deux effets :
+#   - l'API rejoint le réseau `edge` et devient joignable par le proxy sous le nom
+#     `meds-api` (c'est ce nom qui figure dans conf.d/meds-api.caddy) ;
+#   - aucun profil frontal n'est activé, donc le service `caddy` du projet ne
+#     démarre pas et n'entre pas en conflit sur les ports 80/443.
+#
+# Le réseau `edge` fournit aussi la sortie Internet dont le synchroniseur a besoin
+# pour joindre l'ANSM — c'est le montage A de docs/08-deploiement-docker.md §7.
+
+services:
+  api:
+    container_name: meds-api
+    networks:
+      - internal
+      - edge
+
+networks:
+  edge:
+    name: edge
+    external: true

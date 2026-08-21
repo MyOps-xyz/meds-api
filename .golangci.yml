@@ -1,0 +1,131 @@
+version: "2"
+
+# Configuration golangci-lint v2 (voir Makefile: GOLANGCI_LINT_VERSION).
+# Référence : https://golangci-lint.run/usage/configuration/
+
+run:
+  timeout: 3m
+  tests: true
+
+linters:
+  # Les linters listés dans `default` remplacent le jeu par défaut de golangci-lint.
+  default: none
+  enable:
+    # -- exigés par docs/12-backlog-taches.md (T-02) --
+    - gosec        # sécurité (injections, crypto faible, permissions...)
+    - errcheck     # erreurs de retour ignorées
+    - revive       # style et bonnes pratiques (remplaçant de golint)
+    - staticcheck  # bugs et simplifications (inclut le jeu historique honnef.co/go/tools)
+    - ineffassign  # affectations jamais utilisées
+    # misspell est **délibérément absent**, contrairement à ce que demandait
+    # T-02. Il vérifie l'orthographe anglaise, or les commentaires de ce
+    # dépôt sont en français par convention (docs/README.md).
+    #
+    # Mesuré le 15/08/2026 : 86 signalements, **zéro vrai positif**. Il
+    # « corrige » candidats→candidates, compteurs→computers,
+    # normalise→normalize, plantes→planets… et jusqu'à licence→license, ce
+    # qui serait une faute : « Licence Ouverte » est le nom officiel de la
+    # licence des données.
+    #
+    # Un linter qui produit 86 faux positifs et aucun vrai n'améliore rien :
+    # il apprend à ignorer la sortie du lint, ce qui coûte plus cher que son
+    # absence. Une liste `ignore-words` de cinquante mots français aurait
+    # simplement déplacé le problème, et grossi à chaque commentaire ajouté.
+    # -- ajouts demandés --
+    - govet
+    - unused
+    - bodyclose    # corps de réponse HTTP non fermé
+    - errorlint    # wrapping d'erreurs conforme à Go 1.13+ (%w, errors.Is/As)
+    - copyloopvar  # capture de variable de boucle par valeur (obsolète en Go moderne, mais utile en revue)
+    - nolintlint   # directives //nolint mal formées, inutiles ou sans justification
+
+  settings:
+    revive:
+      severity: warning
+      confidence: 0.8
+
+    errcheck:
+      check-type-assertions: true
+      # check-blank reste désactivé : `_, _ = io.Copy(io.Discard, body)` est la
+      # façon idiomatique en Go de déclarer qu'une erreur est examinée puis
+      # écartée sciemment. L'activer transforme cette déclaration explicite en
+      # violation et pousse à cacher le rejet dans une fonction d'emballage,
+      # ce qui rend la décision moins visible en revue, pas plus sûre.
+      # Une erreur simplement non assignée, elle, reste signalée.
+      check-blank: false
+
+    gosec:
+      excludes:
+        # G304 (lecture de fichier à chemin variable) : le cœur du projet est
+        # justement un lecteur de fichiers BDPM dont le chemin est configuré
+        # (MEDS_DATA_DIR) et non une entrée utilisateur HTTP — faux positif
+        # systématique sur internal/bdpm. Réévaluer si un chemin issu d'une
+        # requête HTTP venait à être ouvert directement.
+        - G304
+
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+
+  exclusions:
+    generated: lax
+    rules:
+      # Les tests utilisent volontairement des constantes "sensibles" (clés
+      # API factices, mots de passe de test), des identifiants pseudo-
+      # aléatoires non cryptographiques (jeux de données, fuzz), et des
+      # handlers httptest qui renvoient le chemin demandé pour rendre les
+      # assertions lisibles — G705 (XSS) n'a pas de sens face à un client Go
+      # qui compare des octets, sans navigateur ni rendu HTML.
+      # Ces trois règles sont levées uniquement sur les fichiers _test.go,
+      # jamais sur le code de production.
+      - path: _test.go
+        linters:
+          - gosec
+        text: "G101|G404|G705"
+      # Permissions de fichiers et de répertoires dans les fixtures : elles
+      # sont créées sous t.TempDir(), effacées à la fin du test, et ne
+      # contiennent aucune donnée réelle. Exiger 0600/0750 sur un jeu
+      # d'essai n'apporte rien et rend les tests moins lisibles.
+      # G115 y couvre des conversions d'index dans des générateurs de
+      # données, bornées par construction.
+      - path: _test.go
+        linters:
+          - gosec
+        text: "G301|G306|G115"
+      # errcheck sur les défers de fermeture est redondant avec bodyclose et
+      # génère du bruit sur des Close() dont l'erreur n'est jamais actionnable
+      # (fichiers en lecture seule) : limité aux tests pour ne rien masquer
+      # côté production.
+      - path: _test.go
+        linters:
+          - errcheck
+        text: "Error return value of `.*\\.Close` is not checked"
+      # Assertions de type non vérifiées dans les tests : `body["meta"].(map…)`
+      # sur une réponse dont on vient de valider le statut. Une assertion qui
+      # échoue provoque une panique, or une panique dans un test **est** un
+      # échec de test, avec la pile d'appel qui désigne la ligne fautive. La
+      # forme vérifiée n'ajouterait qu'un `if !ok { t.Fatal(…) }` par
+      # assertion, moins lisible pour un diagnostic identique.
+      - path: _test.go
+        linters:
+          - errcheck
+        text: "Error return value is not checked"
+      # G703 vise un filepath.Join dont un membre vient d'une structure de
+      # test énumérant les dix fichiers de la source. Aucune entrée externe.
+      - path: _test.go
+        linters:
+          - gosec
+        text: "G703"
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/MyOps-xyz/meds-api
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

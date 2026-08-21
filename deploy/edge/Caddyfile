@@ -1,0 +1,69 @@
+# Frontal mutualisé du serveur — détient 80/443 pour TOUS les services hébergés.
+#
+# Ce fichier ne contient que le global et les fragments réutilisables.
+# Un service = un fichier dans conf.d/. Voir README.md.
+{
+	# Le placeholder est **quoté** : une variable vide produirait sinon zéro
+	# argument, et Caddy refuserait de démarrer avec « wrong argument count
+	# after 'email' ». Quoté, il vaut la chaîne vide — équivalent à ne pas
+	# fournir de contact ACME, ce qui est exactement le cas en local où l'AC
+	# interne est utilisée.
+	email "{$ACME_EMAIL}"
+	servers {
+		protocols h1 h2 h3
+	}
+}
+
+# ─── Fragments réutilisables ──────────────────────────────────────────────
+# Importés par les blocs de conf.d/ via `import <nom>`.
+
+# tls_config est **volontairement vide** dans cette variante : Caddy gère les
+# certificats tout seul, par ACME ou par son autorité interne. Le fragment
+# existe pour que les fichiers de conf.d/ soient rigoureusement identiques
+# entre ce montage et la variante Cloudflare (Caddyfile.cloudflare), où il
+# porte le certificat d'origine et l'authentification du client.
+(tls_config) {
+}
+
+# Compression et en-têtes de sécurité communs à tous les services exposés.
+(hardened) {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+}
+
+# Endpoints d'exploitation : JAMAIS servis par le frontal public.
+#
+# Le filtrage par `remote_ip private_ranges` a été écarté après vérification : l'adresse
+# source vue par Caddy dépend du mode de publication des ports. Sous Docker Desktop,
+# OrbStack, un userland-proxy ou un CDN en amont, elle est celle d'une passerelle privée
+# — la règle laisse alors passer /metrics vers Internet en croyant le refuser. Vérifié
+# le 15/08/2026 : `curl https://…/metrics` depuis l'hôte renvoyait 200 au lieu de 403.
+#
+# Prometheus n'a de toute façon pas à passer par le frontal : il scrute `api:8080/metrics`
+# directement sur le réseau `internal`, qui n'a aucune route entrante depuis Internet.
+(ops-privees) {
+	@ops path /metrics /debug/*
+	respond @ops 403
+
+	# Variante « supervision distante » : si le collecteur est sur une autre machine,
+	# remplacer le bloc ci-dessus par un allowlist explicite de son adresse publique.
+	# Ne jamais y mettre `private_ranges` : voir ci-dessus.
+	#
+	#   @ops-refuse {
+	#       path /metrics /debug/*
+	#       not remote_ip 203.0.113.7
+	#   }
+	#   respond @ops-refuse 403
+}
+
+# ─── Services ─────────────────────────────────────────────────────────────
+# Aucun nom d'hôte n'est déclaré ici : un domaine absent de conf.d/ n'est pas
+# servi, et aucun certificat n'est demandé pour lui. Fermé par défaut.
+
+import conf.d/*.caddy

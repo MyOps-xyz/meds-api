@@ -1,0 +1,141 @@
+# Déploiement de meds-api (docs/08-deploiement-docker.md §3).
+#
+# Un seul fichier, deux profils de frontal. Le service `api` est **strictement
+# identique** dans les deux cas ; seul le frontal change.
+#
+#   docker compose --profile caddy   up -d      # défaut recommandé
+#   docker compose --profile traefik up -d      # si Traefik est déjà en place
+#
+# Sur un serveur hébergeant d'autres services, n'activer **aucun** profil et
+# employer le frontal mutualisé de deploy/edge/ (§6).
+
+name: meds-api
+
+x-hardening: &hardening
+  read_only: true
+  cap_drop: [ALL]
+  security_opt:
+    - no-new-privileges:true
+  restart: unless-stopped
+
+services:
+  api:
+    build:
+      context: .
+      args:
+        VERSION: ${VERSION:-dev}
+        COMMIT: ${COMMIT:-unknown}
+        BUILD_DATE: ${BUILD_DATE:-unknown}
+    image: meds-api:${VERSION:-dev}
+    <<: *hardening
+    environment:
+      MEDS_ADDR: ":8080"
+      MEDS_DATA_DIR: "/data"
+      # Compose refuse de démarrer si la variable est absente : le service ne
+      # peut pas être exposé sans authentification par inadvertance.
+      MEDS_API_KEYS: ${MEDS_API_KEYS:?MEDS_API_KEYS est obligatoire}
+      MEDS_ADMIN_KEY: ${MEDS_ADMIN_KEY:-}
+      MEDS_SYNC_CRON: ${MEDS_SYNC_CRON:-0 4 * * *}
+      MEDS_SYNC_JITTER: ${MEDS_SYNC_JITTER:-30m}
+      MEDS_RATE_LIMIT: ${MEDS_RATE_LIMIT:-100}
+      MEDS_RATE_BURST: ${MEDS_RATE_BURST:-200}
+      MEDS_CORS_ORIGINS: ${MEDS_CORS_ORIGINS:-}
+      MEDS_LOG_LEVEL: ${MEDS_LOG_LEVEL:-info}
+      # GOMEMLIMIT sous la limite du conteneur : le ramasse-miettes se
+      # déclenche avant que le noyau ne tue le processus. GOGC élevé parce que
+      # le tas est dominé par des structures immuables et de longue durée de
+      # vie — collecter souvent n'y récupère presque rien.
+      GOMEMLIMIT: "400MiB"
+      GOGC: "200"
+    volumes:
+      - meds-data:/data
+      # read_only impose un tmpfs sur /tmp : le snapshot s'écrit en temporaire
+      # avant le rename atomique (docs/09-pipeline-mise-a-jour.md §3.7).
+      - type: tmpfs
+        target: /tmp
+        tmpfs: { size: 67108864 } # 64 Mio
+    healthcheck:
+      # Le binaire se sonde lui-même : distroless n'a ni curl, ni wget.
+      test: ["CMD", "/usr/local/bin/meds-api", "healthcheck"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits: { cpus: "2.0", memory: 512M }
+        reservations: { cpus: "0.5", memory: 128M }
+    labels:
+      # Étiquettes du profil Traefik. Elles sont inertes sous le profil Caddy :
+      # `exposedByDefault: false` fait qu'un service non étiqueté n'est jamais
+      # exposé, et Traefik n'est de toute façon pas démarré.
+      - "traefik.enable=true"
+      - "traefik.docker.network=meds-api_public"
+      - "traefik.http.routers.meds.rule=Host(`${DOMAIN:-localhost}`)"
+      - "traefik.http.routers.meds.entrypoints=websecure"
+      - "traefik.http.routers.meds.tls=true"
+      - "traefik.http.routers.meds.middlewares=security-headers@file,compress@file"
+      - "traefik.http.services.meds.loadbalancer.server.port=8080"
+      - "traefik.http.services.meds.loadbalancer.healthcheck.path=/healthz"
+      - "traefik.http.services.meds.loadbalancer.healthcheck.interval=10s"
+      # /metrics et /debug/* refusés depuis le frontal, avec une priorité
+      # supérieure à celle du routeur principal pour l'emporter sur lui.
+      - "traefik.http.routers.meds-ops.rule=Host(`${DOMAIN:-localhost}`) && (PathPrefix(`/metrics`) || PathPrefix(`/debug`))"
+      - "traefik.http.routers.meds-ops.entrypoints=websecure"
+      - "traefik.http.routers.meds-ops.tls=true"
+      - "traefik.http.routers.meds-ops.middlewares=block-ops@file"
+      - "traefik.http.routers.meds-ops.service=meds"
+      - "traefik.http.routers.meds-ops.priority=100"
+    # `api` est sur `internal` **et** `public` : il a besoin d'une sortie
+    # Internet pour joindre l'ANSM. C'est le montage A de §7 ; les montages B
+    # et C permettent de s'en passer.
+    networks: [internal, public]
+
+  caddy:
+    profiles: [caddy]
+    image: caddy:2.11.4-alpine
+    restart: unless-stopped
+    ports: ["80:80", "443:443", "443:443/udp"] # UDP pour HTTP/3
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+      ACME_EMAIL: ${ACME_EMAIL:-}
+    volumes:
+      - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data # certificats — DOIT être persisté
+      - caddy-config:/config
+    depends_on:
+      api: { condition: service_healthy }
+    networks: [internal, public]
+
+  traefik:
+    profiles: [traefik]
+    image: traefik:v3.7.10
+    restart: unless-stopped
+    ports: ["80:80", "443:443", "443:443/udp"]
+    environment:
+      ACME_EMAIL: ${ACME_EMAIL:-}
+    volumes:
+      # Socket en lecture seule : Traefik découvre les services par labels.
+      # C'est le prix de ce mode de découverte, et la raison pour laquelle
+      # Caddy reste le profil recommandé (ADR 0005, ADR 0006).
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./deploy/traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./deploy/traefik/dynamic:/etc/traefik/dynamic:ro
+      - ./deploy/traefik/certs:/certs:ro
+      - traefik-acme:/acme
+    depends_on:
+      api: { condition: service_healthy }
+    networks: [internal, public]
+
+volumes:
+  meds-data: {}
+  caddy-data: {}
+  caddy-config: {}
+  traefik-acme: {}
+
+networks:
+  public: {}
+  # internal: true coupe toute route sortante. `api` n'y est pas confiné (voir
+  # ci-dessus), mais le réseau existe pour les montages B et C, et pour un
+  # collecteur Prometheus qui scrute l'API sans passer par le frontal.
+  internal: { internal: true }

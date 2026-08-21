@@ -1,0 +1,16 @@
+# Réduit le contexte de build et évite d'expédier un data/ local de plusieurs
+# dizaines de mégaoctets.
+.git/
+.github/
+docs/
+deploy/
+testdata/
+data/
+tools/bin/
+*.md
+.env
+.env.local
+bin/
+dist/
+coverage.html
+*.out

@@ -1,0 +1,31 @@
+# Binaires compilés
+/bin/
+/dist/
+meds-api
+bdpm-sync
+
+# Artefacts de test et de couverture
+*.test
+*.out
+coverage.html
+/testdata/tmp/
+
+# Données d'exécution : snapshots, fichiers source téléchargés
+/data/
+/deploy/data/
+
+# Configuration locale
+.env
+.env.local
+
+# Outillage local
+/tools/bin/
+
+# Systèmes de fichiers et éditeurs
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# Dépendances Node (semantic-release est exécuté via npx, sans installation locale)
+/node_modules/

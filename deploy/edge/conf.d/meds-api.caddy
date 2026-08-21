@@ -1,0 +1,15 @@
+# meds-api — API REST de la Base de Données Publique des Médicaments.
+#
+# Le conteneur applicatif est joint par son nom sur le réseau Docker `edge`.
+# Il ne publie aucun port hôte : ce bloc est son unique voie d'accès.
+
+{$MEDS_DOMAIN:meds.localhost} {
+	import tls_config
+	import hardened
+	import ops-privees
+
+	reverse_proxy meds-api:8080 {
+		health_uri /healthz
+		health_interval 10s
+	}
+}

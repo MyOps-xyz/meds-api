@@ -1,0 +1,32 @@
+# Superposition « Cloudflare en proxy ».
+#
+#   docker compose -f docker-compose.yml -f compose.cloudflare.yml up -d
+#
+# Trois différences avec le montage ACME :
+#
+#  1. Le Caddyfile monté est la variante Cloudflare : certificat d'origine et
+#     authentification du client, aucun ACME.
+#  2. Seul le port 443 est publié. Cloudflare redirige déjà HTTP vers HTTPS à
+#     sa périphérie, et le challenge ACME n'existe plus : laisser le port 80
+#     ouvert n'offrirait qu'une surface d'attaque de plus.
+#  3. Le volume `caddy-data` perd son rôle de coffre à certificats. Il reste
+#     monté — Caddy y écrit son état interne — mais il n'a plus à être
+#     sauvegardé : le certificat d'origine vient de Cloudflare et se
+#     régénère en trois clics.
+
+services:
+  caddy:
+    ports: !override
+      - "443:443"
+    volumes:
+      - ./Caddyfile.cloudflare:/etc/caddy/Caddyfile:ro
+      - ./conf.d:/etc/caddy/conf.d:ro
+      # Certificat d'origine Cloudflare, sa clé privée, et l'autorité qui
+      # signe les certificats clients de Cloudflare. En lecture seule : le
+      # conteneur n'a aucune raison d'y écrire.
+      - ./certs:/certs:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    environment:
+      # ACME_EMAIL n'est plus requis : il n'y a plus d'ACME.
+      MEDS_DOMAIN: ${MEDS_DOMAIN:?MEDS_DOMAIN est obligatoire derrière Cloudflare}

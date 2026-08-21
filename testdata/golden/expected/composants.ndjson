@@ -1,0 +1,4 @@
+{"cis":"60002283","element_pharmaceutique":"comprimé","code_substance":"42215","denomination_substance":"PARACÉTAMOL","dosage":"1000,00 mg","reference_dosage":"un comprimé","nature":"SA","numero_liaison":1}
+{"cis":"60002284","element_pharmaceutique":"gélule","code_substance":"12345","denomination_substance":"BÉSILATE D'AMLODIPINE","dosage":"6,94 mg","reference_dosage":"une gélule","nature":"SA","numero_liaison":1}
+{"cis":"60002284","element_pharmaceutique":"gélule","code_substance":"12346","denomination_substance":"AMLODIPINE","dosage":"5,00 mg","reference_dosage":"une gélule","nature":"FT","numero_liaison":1}
+{"cis":"60002285","element_pharmaceutique":"comprimé","code_substance":"54321","denomination_substance":"ACIDE ACÉTYLSALICYLIQUE","dosage":"2CH à 30CH et 4DH à 60DH","reference_dosage":"un comprimé","nature":"SA","numero_liaison":1}

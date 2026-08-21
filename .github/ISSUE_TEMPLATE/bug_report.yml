@@ -1,0 +1,90 @@
+name: Rapport de bogue
+description: Signaler un comportement incorrect de l'API ou du synchroniseur
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Merci pour ce signalement.
+
+        **Pour une vulnérabilité de sécurité, n'utilisez pas ce formulaire** : suivez
+        [SECURITY.md](https://github.com/MyOps-xyz/meds-api/blob/main/SECURITY.md).
+
+  - type: checkboxes
+    id: preliminaires
+    attributes:
+      label: Préalables
+      options:
+        - label: J'ai cherché une issue existante décrivant le même problème.
+          required: true
+        - label: Le problème ne vient pas d'une donnée erronée à la source (BDPM/ANSM), que l'API restitue fidèlement par conception.
+          required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: "Sortie de `meds-api --version`, ou tag de l'image Docker."
+      placeholder: "v0.3.0 (commit abc1234)"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: deploiement
+    attributes:
+      label: Mode de déploiement
+      options:
+        - Binaire compilé depuis les sources
+        - Docker Compose, profil caddy
+        - Docker Compose, profil traefik
+        - Frontal mutualisé (deploy/edge)
+        - Autre
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Étapes de reproduction
+      description: "Idéalement une requête `curl` minimale. Expurgez les clés API."
+      render: bash
+      placeholder: |
+        curl -s -H "Authorization: Bearer $KEY" \
+          "http://localhost:8080/v1/medicaments?q=doliprane&limit=20"
+    validations:
+      required: true
+
+  - type: textarea
+    id: attendu
+    attributes:
+      label: Comportement attendu
+    validations:
+      required: true
+
+  - type: textarea
+    id: obtenu
+    attributes:
+      label: Comportement obtenu
+      description: "Réponse HTTP complète (statut, en-têtes pertinents, corps) ou message d'erreur."
+    validations:
+      required: true
+
+  - type: textarea
+    id: dataset
+    attributes:
+      label: État du jeu de données
+      description: "Sortie de `GET /v1/dataset` — elle situe la version des données servies."
+      render: json
+
+  - type: textarea
+    id: journaux
+    attributes:
+      label: Journaux
+      description: "Extrait pertinent des journaux JSON. Expurgez toute donnée sensible."
+      render: text
+
+  - type: textarea
+    id: contexte
+    attributes:
+      label: Contexte additionnel
+      description: "Configuration non standard, contraintes réseau, tout élément utile."

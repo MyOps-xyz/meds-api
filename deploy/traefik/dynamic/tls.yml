@@ -1,0 +1,30 @@
+# Certificats fournis manuellement, pour le développement local.
+#
+# Contrairement à Caddy, Traefik n'a **pas d'autorité de certification
+# interne** : sans résolveur ACME joignable, il sert un certificat auto-signé
+# générique que les navigateurs rejettent. C'est la principale raison pour
+# laquelle Caddy est le profil recommandé (ADR 0005).
+#
+# Pour un développement local propre :
+#
+#   mkcert -install
+#   mkcert -cert-file deploy/traefik/certs/local.pem \
+#          -key-file  deploy/traefik/certs/local-key.pem "meds.localhost"
+#
+# Ce fichier est inerte tant que les deux fichiers n'existent pas : Traefik
+# journalise un avertissement et poursuit avec le résolveur ACME.
+
+tls:
+  certificates:
+    - certFile: /certs/local.pem
+      keyFile: /certs/local-key.pem
+
+  options:
+    default:
+      minVersion: VersionTLS12
+      # Suites modernes uniquement. TLS 1.3 négocie les siennes.
+      cipherSuites:
+        - TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384
+        - TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
+        - TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305
+        - TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305

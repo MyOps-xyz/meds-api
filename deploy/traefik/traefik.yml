@@ -1,0 +1,76 @@
+# Configuration statique de Traefik (docs/08-deploiement-docker.md §5).
+#
+# Profil alternatif à Caddy, fourni parce que le choix du frontal appartient
+# souvent à l'exploitant : une organisation qui opère déjà un Traefik n'en
+# déploiera pas un second (ADR 0005).
+
+entryPoints:
+  web:
+    address: ":80"
+    http:
+      # Redirection permanente vers HTTPS. Caddy le fait sans configuration ;
+      # ici il faut le demander.
+      redirections:
+        entryPoint:
+          to: websecure
+          scheme: https
+          permanent: true
+  websecure:
+    address: ":443"
+    http:
+      tls:
+        certResolver: letsencrypt
+    http3: {}
+    transport:
+      respondingTimeouts:
+        readTimeout: 10s
+        writeTimeout: 15s
+        idleTimeout: 60s
+
+providers:
+  docker:
+    # Un service non étiqueté n'est jamais exposé. C'est le défaut inverse de
+    # celui de Traefik, et le seul acceptable : sans lui, tout conteneur ajouté
+    # à la machine se retrouverait publié sur Internet.
+    exposedByDefault: false
+    network: meds-api_public
+    # Le provider Docker voit **tous** les conteneurs de la machine, pas
+    # seulement ceux de ce projet : mesuré le 15/08/2026, ce Traefik captait
+    # les routeurs `core-api@docker` d'un projet voisin et journalisait une
+    # erreur par cycle pour chacun. Sans contrainte, un conteneur étiqueté
+    # d'un autre projet serait purement et simplement exposé par ce frontal.
+    #
+    # C'est un écart de fond avec le profil Caddy, dont la configuration est
+    # explicite et ne peut rien découvrir : une raison de plus de préférer
+    # Caddy (ADR 0005), et l'argument qui rend le socket en lecture seule
+    # insuffisant à lui seul.
+    constraints: "Label(`com.docker.compose.project`,`meds-api`)"
+  file:
+    directory: /etc/traefik/dynamic
+    watch: true
+
+certificatesResolvers:
+  letsencrypt:
+    acme:
+      email: "{{ env \"ACME_EMAIL\" }}"
+      storage: /acme/acme.json
+      tlsChallenge: {}
+
+log:
+  level: INFO
+  format: json
+accessLog:
+  format: json
+  fields:
+    headers:
+      defaultMode: drop
+      names:
+        # L'en-tête Authorization n'est jamais journalisé, sous aucune forme.
+        Authorization: drop
+        X-Request-Id: keep
+
+api:
+  # Tableau de bord désactivé : il n'a rien à faire sur une instance exposée,
+  # et l'activer derrière une authentification maison serait un risque de plus
+  # pour un bénéfice nul en production.
+  dashboard: false

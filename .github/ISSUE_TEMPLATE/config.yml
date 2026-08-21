@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Vulnérabilité de sécurité
+    url: https://github.com/MyOps-xyz/meds-api/security/advisories/new
+    about: "N'ouvrez jamais d'issue publique pour une vulnérabilité. Utilisez ce formulaire privé — voir SECURITY.md."
+  - name: Question ou aide à l'usage
+    url: https://github.com/MyOps-xyz/meds-api/discussions
+    about: "Pour une question d'utilisation ou de déploiement, ouvrez plutôt une discussion."
+  - name: Donnée incorrecte dans la BDPM
+    url: https://base-donnees-publique.medicaments.gouv.fr/
+    about: "L'API restitue fidèlement les fichiers de l'ANSM. Une erreur présente à la source relève de l'ANSM, pas de ce dépôt."

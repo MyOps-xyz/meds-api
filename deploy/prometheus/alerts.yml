@@ -1,0 +1,169 @@
+# Règles d'alerte meds-api (docs/10-observabilite.md §5).
+#
+# Validation :  promtool check rules deploy/prometheus/alerts.yml
+#
+# Chaque alerte porte une annotation `runbook` : une alerte qui ne dit pas
+# quoi faire réveille quelqu'un pour rien.
+
+groups:
+  - name: meds-api-disponibilite
+    rules:
+      - alert: MedsApiDown
+        expr: up{job="meds-api"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "meds-api injoignable ({{ $labels.instance }})"
+          description: "Prometheus ne parvient plus à collecter l'instance depuis 2 minutes."
+          runbook: >-
+            Vérifier l'état du conteneur, puis /healthz. Si le processus vit mais ne répond pas,
+            consulter les journaux : une panique répétée est visible dans meds_http_panics_total.
+
+      - alert: MedsApiNotReady
+        # L'absence de la métrique est le signal : elle n'est exposée que si
+        # le processus tourne, et vaut -1 tant qu'aucun jeu de données n'est
+        # publié.
+        expr: absent(meds_dataset_age_seconds) or meds_dataset_age_seconds < 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "meds-api ne sert aucun jeu de données"
+          description: "Aucun snapshot n'est publié depuis 5 minutes ; /readyz répond 503."
+          runbook: >-
+            Démarrage à froid : la première synchronisation prend ~30 s, l'alerte se résout seule.
+            Au-delà, consulter meds_sync_attempts_total{result="failure"} et les journaux
+            d'ingestion — la source de l'ANSM ou la validation de vraisemblance est en cause.
+
+  - name: meds-api-fraicheur
+    rules:
+      # L'alerte à ne pas manquer. Une API qui répond parfaitement avec des
+      # données de trois semaines est plus dangereuse qu'une API en panne :
+      # l'utilisateur ne perçoit rien.
+      - alert: MedsDatasetStale
+        expr: meds_dataset_age_seconds > 259200
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Jeu de données vieux de plus de 72 h"
+          description: "Âge : {{ $value | humanizeDuration }}. Deux cycles de synchronisation ont été manqués."
+          runbook: >-
+            Déclencher POST /admin/sync et suivre le rapport. Si l'ingestion échoue sur un contrôle
+            de vraisemblance, le format amont a probablement changé : comparer les compteurs de
+            /v1/dataset à ceux du snapshot précédent.
+
+      - alert: MedsDatasetVeryStale
+        expr: meds_dataset_age_seconds > 604800
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Jeu de données vieux de plus de 7 jours"
+          description: "Âge : {{ $value | humanizeDuration }}. Le pipeline est durablement cassé."
+          runbook: >-
+            Traiter comme un incident de données de santé : les prix et les statuts de
+            commercialisation servis ne sont plus fiables. Envisager de retirer l'instance du
+            service tant que la cause n'est pas identifiée.
+
+      - alert: MedsSyncFailing
+        expr: increase(meds_sync_attempts_total{result="failure"}[24h]) >= 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Deux synchronisations en échec sur 24 h"
+          runbook: >-
+            Consulter les journaux d'ingestion. Un échec sur le contrôle « taux_rejet » signale un
+            changement de format ; sur « hors_perimetre », un CIS_bdpm.txt tronqué en amont
+            (ADR 0007) ; sur « variation_compteur », une chute anormale de volumétrie.
+
+  - name: meds-api-qualite-de-service
+    rules:
+      - alert: MedsHighErrorRate
+        expr: >-
+          sum(rate(meds_http_requests_total{status="5xx"}[5m]))
+            / sum(rate(meds_http_requests_total[5m])) > 0.01
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Plus de 1 % de réponses 5xx"
+          description: "Taux d'erreur : {{ $value | humanizePercentage }}."
+          runbook: >-
+            Identifier la route fautive avec meds_http_requests_total par route, puis retrouver les
+            requêtes concernées par request_id dans les journaux. Vérifier meds_http_panics_total.
+
+      - alert: MedsHighLatency
+        expr: >-
+          histogram_quantile(0.99,
+            sum by (le, route) (rate(meds_http_request_duration_seconds_bucket[5m]))) > 0.01
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "p99 supérieur à 10 ms sur {{ $labels.route }}"
+          description: "p99 : {{ $value }} s, budget 10 ms."
+          runbook: >-
+            Comparer aux budgets de docs/07-performance.md. Une dégradation soudaine coïncide
+            souvent avec une bascule de Store (meds_store_swaps_total) ou une pointe de
+            concurrence (meds_http_in_flight_requests).
+
+      - alert: MedsRateLimitSpike
+        expr: sum(rate(meds_ratelimit_rejected_total[5m])) > 100
+        for: 5m
+        labels:
+          severity: info
+        annotations:
+          summary: "Plus de 100 refus de quota par seconde"
+          runbook: >-
+            Distinguer l'abus du client mal réglé : meds_ratelimit_rejected_total{scope="key"}
+            désigne une clé identifiée, scope="ip" un trafic non authentifié.
+
+  - name: meds-api-donnees-et-ressources
+    rules:
+      - alert: MedsQuarantineSpike
+        # Le seuil porte sur les **rejets** (lignes malformées), jamais sur le
+        # hors périmètre : celui-ci vaut ~8 800 lignes en régime normal
+        # (ADR 0007), et une alerte à 100 se déclencherait en permanence.
+        expr: sum(meds_dataset_quarantine_records) > 100
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Plus de 100 lignes rejetées à l'ingestion"
+          description: "{{ $value }} lignes malformées ; le régime normal est de 0."
+          runbook: >-
+            Consulter /v1/dataset : quarantine.by_file et quarantine.by_reason désignent le
+            fichier et la nature du défaut. Un pic sur un seul fichier signale un changement de
+            format de ce fichier.
+
+      - alert: MedsOutOfScopeSpike
+        # Garde-fou complémentaire : une envolée du hors périmètre signale un
+        # CIS_bdpm.txt tronqué en amont, panne que le taux de rejet ne peut
+        # plus détecter depuis la séparation des deux catégories.
+        expr: >-
+          sum(meds_dataset_out_of_scope_records)
+            / sum(meds_dataset_records{entity="specialites"}) > 1.5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Part de lignes hors périmètre anormalement élevée"
+          runbook: >-
+            Vérifier que CIS_bdpm.txt n'a pas été tronqué : comparer le nombre de spécialités au
+            snapshot précédent dans /v1/dataset.
+
+      - alert: MedsMemoryHigh
+        expr: process_resident_memory_bytes{job="meds-api"} > 419430400
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "RSS supérieur à 400 Mio"
+          description: "RSS : {{ $value | humanize1024 }}B, budget 150 Mio en régime établi."
+          runbook: >-
+            Une pointe transitoire pendant une bascule est normale (deux Store coexistent
+            quelques centaines de millisecondes). Une valeur durablement haute suggère une fuite :
+            comparer go_memstats_heap_inuse_bytes et go_goroutines dans le temps.

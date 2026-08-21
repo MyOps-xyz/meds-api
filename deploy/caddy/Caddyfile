@@ -1,0 +1,43 @@
+# Caddyfile du profil `caddy` — frontal DÉDIÉ à meds-api.
+#
+# Usage :  docker compose --profile caddy up -d
+#
+# Ce profil détient les ports 80 et 443 de la machine pour lui seul. Il convient au
+# développement local et à un serveur qui n'héberge que meds-api. Pour mutualiser
+# 80/443 avec d'autres services, ne pas activer ce profil et utiliser la stack
+# frontale partagée de `deploy/edge/` (voir docs/08-deploiement-docker.md §6).
+{
+	# Le placeholder est **quoté** : une variable vide produirait sinon zéro
+	# argument, et Caddy refuserait de démarrer avec « wrong argument count
+	# after 'email' ». Quoté, il vaut la chaîne vide — équivalent à ne pas
+	# fournir de contact ACME, ce qui est exactement le cas en local où l'AC
+	# interne est utilisée.
+	email "{$ACME_EMAIL}"
+	servers {
+		protocols h1 h2 h3
+	}
+}
+
+{$DOMAIN} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	# Endpoints d'exploitation : jamais servis par le frontal.
+	# Le filtrage par `remote_ip private_ranges` est volontairement écarté : sous un
+	# runtime qui masque l'adresse source (Docker Desktop, OrbStack, userland-proxy,
+	# CDN), elle apparaît privée et la règle laisse fuiter /metrics. Prometheus scrute
+	# `api:8080/metrics` en direct sur le réseau `internal`.
+	@ops path /metrics /debug/*
+	respond @ops 403
+
+	reverse_proxy api:8080 {
+		health_uri /healthz
+		health_interval 10s
+	}
+}

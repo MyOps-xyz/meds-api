@@ -1,0 +1,211 @@
+name: Release
+
+# Publication automatique, déclenchée par tout push sur `main` — donc par le
+# merge d'une pull request.
+#
+# semantic-release relit les messages de commit depuis le dernier tag, en
+# déduit la version SemVer suivante (Conventional Commits), puis :
+#   - compile les binaires linux/amd64 et linux/arm64 à cette version,
+#   - crée le tag `vX.Y.Z`,
+#   - publie la release GitHub avec ses notes générées et ses archives,
+#   - construit et pousse l'image Docker multi-arch sur ghcr.io.
+#
+# Rien n'est poussé sur `main` : pas de commit de release, donc aucun besoin
+# d'exempter un acteur d'un éventuel ruleset de protection de branche. Le
+# journal des modifications vit sur la page Releases du dépôt.
+#
+# S'il n'y a aucun commit publiable depuis le dernier tag (que des `chore:`,
+# `test:`, `ci:`…), le workflow se termine sans rien publier : c'est le
+# comportement attendu, pas une erreur.
+#
+# Configuration : .releaserc.json + .github/scripts/prepare-release.sh
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Simulation : calcule la version et les notes sans rien publier"
+        type: boolean
+        default: false
+
+# Jamais deux releases en parallèle, et jamais d'annulation en cours de route :
+# une release interrompue laisserait un tag sans release, ou l'inverse.
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  GOVULNCHECK_VERSION: v1.7.0
+  # semantic-release 25 exige Node ^22.14 || >=24.10.
+  NODE_VERSION: "24"
+  # Versions épinglées à l'exact : une release ne doit jamais dépendre de ce
+  # que npm considère comme « latest » le jour où elle tourne.
+  SEMANTIC_RELEASE_VERSION: 25.0.9
+  PLUGIN_COMMIT_ANALYZER: 13.0.1
+  PLUGIN_RELEASE_NOTES: 14.1.1
+  PLUGIN_EXEC: 7.1.0
+  PLUGIN_GITHUB: 12.0.9
+  PRESET_CONVENTIONALCOMMITS: 10.4.0
+
+jobs:
+  # Rejoue les contrôles bloquants avant de publier : `main` est censé être
+  # vert (ci.yml a tourné sur la PR), mais aucune raison de publier un binaire
+  # sur la foi d'un run antérieur au merge.
+  verify:
+    name: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: go test -race
+        run: go test -race -count=1 ./...
+      - name: Installer govulncheck (version épinglée, voir Makefile)
+        run: go install golang.org/x/vuln/cmd/govulncheck@${{ env.GOVULNCHECK_VERSION }}
+      - run: govulncheck ./...
+
+  release:
+    name: semantic-release
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Vide si aucun commit publiable n'a été trouvé : c'est ce qui conditionne
+    # le job `docker` en aval. Alimenté par le `publishCmd` de
+    # @semantic-release/exec, qui écrit dans $GITHUB_OUTPUT.
+    outputs:
+      version: ${{ steps.semantic-release.outputs.version }}
+    permissions:
+      contents: write # créer et pousser le tag, publier la release
+      issues: write # commentaire « publié dans la version X » sur les issues
+      pull-requests: write # idem sur les pull requests
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # semantic-release a besoin de l'historique complet et de tous les
+          # tags pour déterminer la dernière version publiée.
+          fetch-depth: 0
+          # Conserve le credential helper : semantic-release pousse le tag.
+          persist-credentials: true
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Identité git (auteur du tag)
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: semantic-release
+        id: semantic-release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DRY_RUN: ${{ inputs.dry_run == true && '--dry-run' || '' }}
+        run: |
+          npx --yes \
+            --package semantic-release@${{ env.SEMANTIC_RELEASE_VERSION }} \
+            --package @semantic-release/commit-analyzer@${{ env.PLUGIN_COMMIT_ANALYZER }} \
+            --package @semantic-release/release-notes-generator@${{ env.PLUGIN_RELEASE_NOTES }} \
+            --package @semantic-release/exec@${{ env.PLUGIN_EXEC }} \
+            --package @semantic-release/github@${{ env.PLUGIN_GITHUB }} \
+            --package conventional-changelog-conventionalcommits@${{ env.PRESET_CONVENTIONALCOMMITS }} \
+            -- semantic-release $DRY_RUN
+
+  # Publication de l'image sur le registre de conteneurs GitHub. Ne tourne que
+  # si semantic-release a effectivement publié une version : pas de release,
+  # pas d'image. Et comme release.yml n'est déclenché que par un push sur
+  # `main`, aucune image n'est jamais construite depuis une pull request.
+  docker:
+    name: image Docker (ghcr.io)
+    needs: release
+    if: needs.release.outputs.version != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write # pousser sur ghcr.io
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Nom d'image et date de commit
+        id: vars
+        env:
+          REPO: ${{ github.repository }}
+        run: |
+          # ghcr.io n'accepte que des noms en minuscules ; l'organisation
+          # s'écrit « MyOps-xyz ».
+          echo "image=ghcr.io/${REPO,,}" >> "$GITHUB_OUTPUT"
+          # Date du commit, jamais la date courante : deux constructions du
+          # même commit doivent produire la même image (cf. Makefile).
+          echo "build_date=$(git log -1 --format=%cI)" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Étiquettes et libellés
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ steps.vars.outputs.image }}
+          # `value:` force la source de version : le tag git vient d'être créé
+          # par semantic-release, il n'est pas dans le contexte de l'événement.
+          tags: |
+            type=semver,pattern={{version}},value=v${{ needs.release.outputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=v${{ needs.release.outputs.version }}
+            type=semver,pattern={{major}},value=v${{ needs.release.outputs.version }}
+            type=raw,value=latest
+
+      - name: Construction et publication (linux/amd64, linux/arm64)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=v${{ needs.release.outputs.version }}
+            COMMIT=${{ github.sha }}
+            BUILD_DATE=${{ steps.vars.outputs.build_date }}
+          # Provenance SLSA et SBOM attachées à l'index : traçabilité de la
+          # chaîne d'approvisionnement (docs/06-securite.md). Effet de bord
+          # cosmétique : deux entrées « unknown/unknown » dans l'onglet
+          # Packages, qui sont les manifestes d'attestation.
+          provenance: mode=max
+          sbom: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Récapitulatif
+        env:
+          IMAGE: ${{ steps.vars.outputs.image }}
+          VERSION: ${{ needs.release.outputs.version }}
+        run: |
+          {
+            echo "### Image publiée"
+            echo
+            echo '```'
+            echo "docker pull ${IMAGE}:${VERSION}"
+            echo '```'
+            echo
+            echo "Également étiquetée \`latest\`, \`${VERSION%.*}\` et \`${VERSION%%.*}\`."
+          } >> "$GITHUB_STEP_SUMMARY"
