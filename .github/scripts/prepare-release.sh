@@ -53,3 +53,18 @@ checksums="meds-api_${TAG}_checksums.txt"
 (cd "$DIST" && sum meds-api_"${TAG}"_*.tar.gz > "$checksums")
 echo "→ ${DIST}/${checksums}"
 cat "${DIST}/${checksums}"
+
+# --- Version exposée au workflow ----------------------------------------------
+# Le job `docker` en aval s'en sert à la fois comme étiquette d'image et comme
+# condition d'exécution : sortie vide = aucune release, donc aucune image.
+#
+# L'écriture a lieu ICI et non dans un `publishCmd` de .releaserc.json :
+# @semantic-release/exec fait passer ses commandes par un template lodash, où
+# `${...}` désigne une expression JavaScript. La syntaxe shell de valeur par
+# défaut `${GITHUB_OUTPUT:-/dev/null}` y était lue comme du JS et provoquait
+# « SyntaxError: Unexpected token ':' ». Le contenu de ce script, lui,
+# n'est jamais vu par le template.
+if [ -n "${GITHUB_OUTPUT:-}" ]; then
+  echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+  echo "→ sortie de job : version=${VERSION}"
+fi
