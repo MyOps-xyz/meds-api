@@ -49,7 +49,16 @@ env:
   PLUGIN_RELEASE_NOTES: 14.1.1
   PLUGIN_EXEC: 7.1.0
   PLUGIN_GITHUB: 12.0.9
-  PRESET_CONVENTIONALCOMMITS: 10.4.0
+  # ATTENTION : ce preset est couplé à la version de
+  # conventional-changelog-writer qu'embarque release-notes-generator, et ce
+  # couplage n'est pas exprimé par un peerDependency — rien ne le signale à
+  # l'installation, l'échec survient à l'étape generateNotes.
+  #   release-notes-generator@14.x  →  conventional-changelog-writer@^8
+  #   preset 9.x                    →  compatible writer@8
+  #   preset 10.x                   →  exige writer@9  ⇒  CASSE
+  # Ne monter en 10.x qu'avec un release-notes-generator@15+ qui passera au
+  # writer@9.
+  PRESET_CONVENTIONALCOMMITS: 9.3.1
 
 jobs:
   # Rejoue les contrôles bloquants avant de publier : `main` est censé être
